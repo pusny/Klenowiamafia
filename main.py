@@ -331,8 +331,6 @@ async def activation_mw(update, ctx):
     text = (msg.text or "").strip()
     if ACTIVATION_REGEX.match(text):
         return
-    if text.lower().startswith("/threadid"):
-        return
     raise ApplicationHandlerStop
 
 
@@ -438,13 +436,15 @@ async def cmd_activate(update, ctx):
         pass
     log.info("Чат %s (%s) активирован пользователем %s",
              chat_id, msg.chat.title or "?", user.id)
+    
+    thread_id = msg.message_thread_id or 0
     note = await ctx.bot.send_message(
         chat_id,
         "✅ <b>Чат активирован!</b>\n\n"
         "🍁 <i>Кленовая мафия</i>\n"
-        "Запуск: <code>мафия начать</code>\n"
-        "ID ветки: <code>/threadid</code>",
+        "Запуск: <code>мафия начать</code>",
         parse_mode=ParseMode.HTML,
+        message_thread_id=thread_id
     )
     await asyncio.sleep(30)
     try:
@@ -512,23 +512,6 @@ def _make_count_kb():
                for i in range(5, 21)]
     rows = [buttons[i:i + 5] for i in range(0, len(buttons), 5)]
     return InlineKeyboardMarkup(rows)
-
-
-async def cmd_threadid(update, ctx):
-    msg = update.effective_message
-    if msg is None or msg.chat.type == "private":
-        return
-    tid = msg.message_thread_id or 0
-    note = await msg.reply_text(
-        f"chat_id: <code>{msg.chat.id}</code>\nthread_id: <code>{tid}</code>",
-        parse_mode=ParseMode.HTML,
-    )
-    await asyncio.sleep(30)
-    try:
-        await note.delete()
-        await msg.delete()
-    except Exception:
-        pass
 
 
 async def cmd_menu(update, ctx):
@@ -1838,7 +1821,6 @@ def _build_app():
         g & filters.TEXT & filters.Regex(MAFIA_STOP_REGEX), cmd_mafia_stop))
     app.add_handler(CommandHandler("mafia", cmd_mafia_start, filters=g))
     app.add_handler(CommandHandler("mafia_stop", cmd_mafia_stop, filters=g))
-    app.add_handler(CommandHandler("threadid", cmd_threadid, filters=g))
     app.add_handler(CommandHandler("menu", cmd_menu, filters=g))
 
     app.add_handler(CommandHandler("start", cmd_dm_start,
