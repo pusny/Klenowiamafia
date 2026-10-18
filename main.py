@@ -1,11 +1,15 @@
 import asyncio
+import json
 import logging
 import os
 import random
 import re
+import secrets
+import string
 import time
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -13,7 +17,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application, ApplicationHandlerStop, CallbackQueryHandler,
-    ChatMemberHandler, CommandHandler, MessageHandler, filters, ContextTypes
+    ChatMemberHandler, CommandHandler, MessageHandler, TypeHandler,
+    filters, ContextTypes
 )
 
 load_dotenv()
@@ -33,15 +38,73 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("mafia")
+log.info("THREAD_ID mode: %s", THREAD_ID if THREAD_ID else "ALL THREADS")
+
+ACTIVATION_FILE = Path("activations.json")
+
+
+def _load_activations():
+    if not ACTIVATION_FILE.exists():
+        return {}
+    try:
+        return json.loads(ACTIVATION_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_activations(data):
+    try:
+        ACTIVATION_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        log.error("save activations fail: %s", e)
+
+
+ACTIVATIONS = _load_activations()
+
+
+def _gen_key():
+    alphabet = string.ascii_uppercase + string.digits
+    return "-".join("".join(secrets.choice(alphabet) for _ in range(4))
+                    for _ in range(2))
+
+
+def is_chat_activated(chat_id):
+    entry = ACTIVATIONS.get(str(chat_id))
+    return bool(entry and entry.get("active"))
+
+
+def set_pending_key(chat_id, key):
+    ACTIVATIONS[str(chat_id)] = {"key": key, "active": False}
+    _save_activations(ACTIVATIONS)
+
+
+def activate_chat_entry(chat_id):
+    entry = ACTIVATIONS.get(str(chat_id))
+    if entry:
+        entry["active"] = True
+        _save_activations(ACTIVATIONS)
+
+
+def _print_pending_on_startup():
+    pending = [(cid, e["key"]) for cid, e in ACTIVATIONS.items()
+               if not e.get("active")]
+    if pending:
+        log.warning("=" * 60)
+        log.warning("  PENDING ACTIVATIONS (%d):", len(pending))
+        for cid, key in pending:
+            log.warning("  chat %s → key %s", cid, key)
+        log.warning("=" * 60)
+
+
+_print_pending_on_startup()
 
 ROLE_NAMES = {
-    "mafia": "Тень",
-    "cop": "Смотритель",
-    "doctor": "Лекарь",
-    "bartender": "Укрыватель",
-    "whore": "Очаровательница",
-    "medium": "Шептун",
-    "citizen": "Житель",
+    "mafia": "Тень", "cop": "Смотритель", "doctor": "Лекарь",
+    "bartender": "Укрыватель", "whore": "Очаровательница",
+    "medium": "Шептун", "citizen": "Житель",
 }
 
 ROLE_DESCRIPTIONS = {
@@ -63,10 +126,12 @@ _ROLE_MAP = {"M": "mafia", "C": "cop", "D": "doctor", "B": "bartender",
              "W": "whore", "N": "medium", "G": "citizen"}
 
 ROLE_DISTRIBUTION = {
-    5: "M C G G G", 6: "M C D G G G", 7: "M M C D G G G",
-    8: "M M C D B G G G", 9: "M M C D B W G G G", 10: "M M M C D B W G G G",
-    11: "M M M C D B W N G G G", 12: "M M M C D B W N G G G G",
-    13: "M M M M C D B W N G G G G", 14: "M M M M C D B W N G G G G G",
+    2:  "M G", 3: "M C G", 4: "M C D G",
+    5:  "M C G G G", 6: "M C D G G G", 7: "M M C D G G G",
+    8:  "M M C D B G G G", 9: "M M C D B W G G G",
+    10: "M M M C D B W G G G", 11: "M M M C D B W N G G G",
+    12: "M M M C D B W N G G G G", 13: "M M M M C D B W N G G G G",
+    14: "M M M M C D B W N G G G G G",
     15: "M M M M C D B W N G G G G G G",
     16: "M M M M M C D B W N G G G G G G",
     17: "M M M M M C D B W N G G G G G G G",
@@ -91,6 +156,10 @@ NIGHT_ACTION_TIMEOUT = 60
 DAY_DISCUSSION_SEC = 180
 VOTE_DURATION_SEC = 60
 MUTE_DURATION_SEC = 5 * 60
+
+ACTIVATION_CMD_REGEX = re.compile(r"(?i)^(?:/)?(?:активация|activate)(?:\s+(\S+))?$")
+ACTIVATION_BYPASS = re.compile(r"(?i)^(?:/)?(?:активация|activate)(?:\s+\S+)?$")
+THREADID_CMD = re.compile(r"(?i)^/threadid$")
 
 
 def get_roles(count):
@@ -218,6 +287,109 @@ def _menu_open_kb(chat_id):
     ])
 
 
+async def activation_gate(update, ctx):
+    msg = update.effective_message
+    if msg is None or msg.chat.type == "private":
+        return
+    if is_chat_activated(msg.chat.id):
+        return
+    text = (msg.text or "").strip()
+    if ACTIVATION_BYPASS.match(text):
+        return
+    if THREADID_CMD.match(text):
+        return
+    raise ApplicationHandlerStop
+
+
+async def on_bot_added(update, ctx):
+    cm = update.my_chat_member
+    if cm is None:
+        return
+    me = await ctx.bot.get_me()
+    if cm.new_chat_member.user.id != me.id:
+        return
+    if cm.new_chat_member.status not in ("member", "administrator"):
+        return
+    if cm.old_chat_member.status not in ("left", "kicked"):
+        return
+    chat_id = cm.chat.id
+    title = cm.chat.title or cm.chat.full_name or str(chat_id)
+    if is_chat_activated(chat_id):
+        try:
+            await ctx.bot.send_message(chat_id, "🍁 Этот чат уже активирован.")
+        except Exception:
+            pass
+        return
+    entry = ACTIVATIONS.get(str(chat_id))
+    if entry and entry.get("key"):
+        key = entry["key"]
+    else:
+        key = _gen_key()
+        set_pending_key(chat_id, key)
+    try:
+        print("=" * 60, flush=True)
+        print(f"  АКТИВАЦИЯ ЧАТА", flush=True)
+        print(f"  Чат: {title} ({chat_id})", flush=True)
+        print(f"  Ключ: {key}", flush=True)
+        print(f"  Введи в чате: активация {key}", flush=True)
+        print("=" * 60, flush=True)
+    except Exception:
+        pass
+    log.warning("ACTIVATION KEY | chat=%s (%s) | key=%s", chat_id, title, key)
+    try:
+        await ctx.bot.send_message(
+            chat_id,
+            "🍁 Спасибо за добавление!\n\n"
+            "Чтобы активировать бота в этом чате:\n"
+            "1. Зайди в консоль хостинга — там будет ключ вида <code>XXXX-YYYY</code>\n"
+            "2. Отправь в чат: <code>активация XXXX-YYYY</code>\n\n"
+            "Без активации бот не реагирует ни на какие команды.",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        pass
+
+
+async def cmd_activate(update, ctx):
+    msg = update.effective_message
+    user = update.effective_user
+    chat = update.effective_chat
+    if not msg or not user or not chat or chat.type == "private":
+        return
+    if is_chat_activated(chat.id):
+        await msg.reply_text("✅ Этот чат уже активирован.")
+        return
+    if not await _is_chat_admin(ctx.bot, chat.id, user.id):
+        await msg.reply_text("⛔ Только администратор может активировать.")
+        return
+    text = (msg.text or "").strip()
+    m = ACTIVATION_CMD_REGEX.match(text)
+    if not m or not m.group(1):
+        await msg.reply_text(
+            "Формат: <code>активация КЛЮЧ</code>\n\n"
+            "Ключ выводится в консоль хостинга при добавлении бота.\n"
+            "Если потерял — перезапусти бота, он покажет все ожидающие ключи.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    entered = m.group(1).strip().upper()
+    entry = ACTIVATIONS.get(str(chat.id))
+    if not entry or not entry.get("key"):
+        await msg.reply_text("❌ Нет ключа для этого чата. Перезапусти бота.")
+        return
+    if entered != entry["key"].upper():
+        await msg.reply_text("❌ Неверный ключ.")
+        return
+    activate_chat_entry(chat.id)
+    await msg.reply_text(
+        "✅ Чат активирован! 🍁\n\n"
+        "Запуск игры: <code>мафия начать</code>\n"
+        "Тест от 2: <code>мафия тест</code>\n"
+        "ID ветки: <code>/threadid</code>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 async def guard_muted_messages(update, ctx):
     msg = update.effective_message
     if msg is None or msg.chat.type == "private":
@@ -225,7 +397,7 @@ async def guard_muted_messages(update, ctx):
     user = update.effective_user
     if user is None or user.is_bot:
         return
-    if THREAD_ID > 0 and not _check_thread(update):
+    if not _check_thread(update):
         return
     game = GAMES.get(msg.chat.id)
     if game is None:
@@ -246,9 +418,9 @@ async def guard_muted_messages(update, ctx):
     raise ApplicationHandlerStop
 
 
-def _make_count_kb():
-    buttons = [InlineKeyboardButton(str(i), callback_data=f"ms:{i}")
-               for i in range(5, 21)]
+def _make_count_kb(prefix="ms", min_count=5):
+    buttons = [InlineKeyboardButton(str(i), callback_data=f"{prefix}:{i}")
+               for i in range(min_count, 21)]
     rows = [buttons[i:i + 5] for i in range(0, len(buttons), 5)]
     return InlineKeyboardMarkup(rows)
 
@@ -311,7 +483,28 @@ async def cmd_mafia_start(update, ctx):
     await msg.reply_text(
         "🍁 *Кленовая мафия* — выберите количество игроков (5–20):",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_make_count_kb(),
+        reply_markup=_make_count_kb("ms", 5),
+    )
+
+
+async def cmd_mafia_test(update, ctx):
+    if not _check_thread(update):
+        return
+    msg = update.effective_message
+    user = update.effective_user
+    chat = update.effective_chat
+    if not msg or not user or not chat or chat.type == "private":
+        return
+    if not await _is_chat_admin(ctx.bot, chat.id, user.id):
+        await msg.reply_text("⛔ Только администратор.")
+        return
+    if chat.id in GAMES:
+        await msg.reply_text("⚠️ В этом чате уже идёт игра.")
+        return
+    await msg.reply_text(
+        "🧪 *Тест Кленовой мафии* — выберите количество (2–20):",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_make_count_kb("ts", 2),
     )
 
 
@@ -351,12 +544,14 @@ async def cb_start_count(update, ctx):
         await q.answer("Игра уже идёт", show_alert=True)
         return
     try:
-        count = int(q.data.split(":")[1])
+        prefix, count_str = q.data.split(":")
+        count = int(count_str)
     except (IndexError, ValueError):
         await q.answer("Ошибка", show_alert=True)
         return
-    if count < 5 or count > 20:
-        await q.answer("От 5 до 20", show_alert=True)
+    min_count = 2 if prefix == "ts" else 5
+    if count < min_count or count > 20:
+        await q.answer(f"От {min_count} до 20", show_alert=True)
         return
     thread_id = q.message.message_thread_id or 0
     game = Game(chat_id=chat.id, thread_id=thread_id, total=count)
@@ -368,10 +563,9 @@ async def cb_start_count(update, ctx):
     ])
     try:
         await q.edit_message_text(
-            f"🍁 *Кленовая мафия* — набор игроков\n\n"
+            f"🍁 *{'Тест ' if prefix == 'ts' else ''}Кленовая мафия* — набор\n\n"
             f"Нужно: *{count}*\nНабрано: *0/{count}*\n\n"
-            f"❗ Каждому игроку нужно нажать /start в личке с ботом — "
-            f"иначе роль не придёт.",
+            f"❗ Каждому игроку нужно нажать /start в личке с ботом.",
             parse_mode=ParseMode.MARKDOWN, reply_markup=kb,
         )
     except Exception as e:
@@ -422,8 +616,7 @@ async def cb_join(update, ctx):
         await ctx.bot.send_message(
             user.id,
             "🍁 Ты в игре «Кленовая мафия». Роль придёт сюда же после набора.\n\n"
-            "Когда начнётся игра, здесь появится кнопка «🍁 Меню» — "
-            "оттуда магазин, профиль и инвентарь.",
+            "Когда игра начнётся, здесь появится кнопка «🍁 Меню».",
             disable_notification=True,
         )
     except Exception:
@@ -517,7 +710,7 @@ async def _start_game(bot, game):
             f"🍁 *Игра началась!*\n\n"
             f"Игроков: *{game.total}*\nТеней: *{len(game.all_mafia())}*\n\n"
             f"Роли отправлены в личку.\n"
-            f"Команда /menu в любой момент — магазин, профиль, инвентарь.",
+            f"Команда /menu — магазин, профиль, инвентарь.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=_menu_open_kb(game.chat_id),
         )
@@ -834,9 +1027,6 @@ async def cb_night_action(update, ctx):
     q = update.callback_query
     if q is None:
         return
-    if not _check_thread(update):
-        await q.answer("Не та ветка", show_alert=True)
-        return
     chat = update.effective_chat
     user = q.from_user
     game = GAMES.get(chat.id)
@@ -881,9 +1071,6 @@ async def cb_night_action(update, ctx):
 async def cb_vote(update, ctx):
     q = update.callback_query
     if q is None:
-        return
-    if not _check_thread(update):
-        await q.answer("Не та ветка", show_alert=True)
         return
     chat = update.effective_chat
     user = q.from_user
@@ -1168,7 +1355,7 @@ async def cb_menu_inv(update, ctx):
     rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")])
     try:
         await q.edit_message_text(
-            "🎒 *Инвентарь*\n\nВыбери предмет, чтобы использовать или активировать:",
+            "🎒 *Инвентарь*\n\nВыбери предмет:",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(rows))
     except Exception:
@@ -1216,7 +1403,7 @@ async def cb_inv_item(update, ctx):
                     callback_data=f"inv:ask:{chat_id}:{iid}:now")])
             else:
                 buttons.append([InlineKeyboardButton(
-                    "⚡ Использовать сейчас (только ночью)",
+                    "⚡ Сейчас (только ночью)",
                     callback_data="noop")])
         if "match" in item["modes"]:
             buttons.append([InlineKeyboardButton(
@@ -1334,7 +1521,7 @@ async def cb_inv_do(update, ctx):
         await q.answer("Готово")
         try:
             await q.edit_message_text(
-                "🍪 Предсказание получено!\n\nПроверь личные сообщения.",
+                "🍪 Предсказание получено!\n\nПроверь ЛС.",
                 reply_markup=_menu_back_kb(chat_id))
         except Exception:
             pass
@@ -1445,22 +1632,33 @@ async def on_member_left(update, ctx):
 
 MAFIA_START_REGEX = re.compile(r"(?i)^мафия\s+(?:начать|старт)$")
 MAFIA_STOP_REGEX = re.compile(r"(?i)^мафия\s+(?:стоп|stop)$")
+MAFIA_TEST_REGEX = re.compile(r"(?i)^мафия\s+(?:тест|test)$")
 
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     g = filters.ChatType.GROUPS
 
+    app.add_handler(TypeHandler(Update, activation_gate), group=-200)
     app.add_handler(MessageHandler(g, guard_muted_messages), group=-100)
+
+    app.add_handler(ChatMemberHandler(
+        on_bot_added, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
+
+    app.add_handler(MessageHandler(
+        g & filters.TEXT & filters.Regex(ACTIVATION_BYPASS), cmd_activate))
+    app.add_handler(CommandHandler("activate", cmd_activate, filters=g))
 
     app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(MAFIA_START_REGEX), cmd_mafia_start))
     app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(MAFIA_STOP_REGEX), cmd_mafia_stop))
+    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(MAFIA_TEST_REGEX), cmd_mafia_test))
     app.add_handler(CommandHandler("mafia", cmd_mafia_start, filters=g))
     app.add_handler(CommandHandler("mafia_stop", cmd_mafia_stop, filters=g))
+    app.add_handler(CommandHandler("test", cmd_mafia_test, filters=g))
     app.add_handler(CommandHandler("threadid", cmd_threadid, filters=g))
     app.add_handler(CommandHandler("menu", cmd_menu, filters=g))
 
-    app.add_handler(CallbackQueryHandler(cb_start_count, pattern=r"^ms:"))
+    app.add_handler(CallbackQueryHandler(cb_start_count, pattern=r"^(ms|ts):"))
     app.add_handler(CallbackQueryHandler(cb_join, pattern=r"^mj$"))
     app.add_handler(CallbackQueryHandler(cb_cancel, pattern=r"^mc$"))
     app.add_handler(CallbackQueryHandler(cb_night_action, pattern=r"^mn:"))
@@ -1480,7 +1678,8 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_inv_do, pattern=r"^inv:do:"))
     app.add_handler(CallbackQueryHandler(cb_noop, pattern=r"^noop$"))
 
-    app.add_handler(ChatMemberHandler(on_member_left, chat_member_types=ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(ChatMemberHandler(
+        on_member_left, chat_member_types=ChatMemberHandler.CHAT_MEMBER))
 
     log.info("Mafia bot starting…")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
