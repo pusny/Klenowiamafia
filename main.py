@@ -772,12 +772,14 @@ async def cb_join(update, ctx):
         [InlineKeyboardButton(f"🎮 Играть ({n}/{game.total})", callback_data="mj")],
         [InlineKeyboardButton("❌ Отменить", callback_data="mc")],
     ])
+    names = ", ".join([p.full_name for p in game.players.values()])
     try:
         await ctx.bot.edit_message_text(
             chat_id=chat.id,
             message_id=game.join_message_id,
             text=f"🍁 *Кленовая мафия* — набор\n\n"
                  f"Нужно: *{game.total}*\nНабрано: *{n}/{game.total}*\n\n"
+                 f"👥 Участники: {names}\n\n"
                  f"❗ Каждому нажать /start в личке с ботом.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=kb,
@@ -1015,19 +1017,23 @@ async def _resolve_night(bot, game):
             )
     if mafia_votes:
         c = Counter(mafia_votes)
-        top_count = c.most_common(1)[0][1]
-        candidates = [tid for tid, cnt in c.items() if cnt == top_count]
-        kill_id = random.choice(candidates)
-        victim = game.players[kill_id]
-        if victim.has_active("amulet"):
-            if victim.active_items["amulet"] == "match":
-                victim.consume_active("amulet")
-            messages.append(f"🛡 Оберег спас *{victim.full_name}*!")
-        elif kill_id == doctor_target:
-            messages.append(f"💉 Лекарь спас *{victim.full_name}*!")
+        top = c.most_common()
+        max_votes = top[0][1]
+        candidates = [tid for tid, cnt in top if cnt == max_votes]
+        if len(candidates) == 1:
+            kill_id = candidates[0]
+            victim = game.players[kill_id]
+            if victim.has_active("amulet"):
+                if victim.active_items["amulet"] == "match":
+                    victim.consume_active("amulet")
+                messages.append(f"🛡 Оберег спас *{victim.full_name}*!")
+            elif kill_id == doctor_target:
+                messages.append(f"💉 Лекарь спас *{victim.full_name}*!")
+            else:
+                victim.alive = False
+                messages.append(f"💀 Убит: *{victim.full_name}*")
         else:
-            victim.alive = False
-            messages.append(f"💀 Убит: *{victim.full_name}*")
+            messages.append("🌅 Тени не смогли договориться. Убийства не было.")
     if not messages:
         messages.append("🌅 Ночь прошла спокойно.")
     await _send_to_chat(
@@ -1039,9 +1045,12 @@ async def _resolve_night(bot, game):
 
 async def _run_day(bot, game):
     game.phase = "day"
+    alive_names = ", ".join([p.full_name for p in game.alive_players()])
     await _send_to_chat(
         bot, game,
-        f"☀️ *День {game.round_num}*\n\nОбсуждение — 3 минуты.",
+        f"☀️ *День {game.round_num}*\n\n"
+        f"Живы: {alive_names}\n\n"
+        f"Обсуждение — 3 минуты.",
         parse_mode=ParseMode.MARKDOWN,
     )
     await asyncio.sleep(DAY_DISCUSSION_SEC)
@@ -1079,24 +1088,25 @@ async def _run_vote(bot, game):
     
     c = Counter(valid_votes.values())
     top = c.most_common()
-    total_alive = len(game.alive_players())
-    majority = total_alive // 2 + 1
     
-    if top and top[0][1] >= majority:
-        eliminated_id = top[0][0]
-        p = game.players[eliminated_id]
-        p.alive = False
-        await _send_to_chat(
-            bot, game,
-            f"⚖️ *Голосование окончено*\n\n"
-            f"Изгнан: *{p.full_name}*\nРоль: *{ROLE_NAMES[p.role]}*",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    else:
-        await _send_to_chat(bot, game,
-            "⚖️ *Голосование окончено*\n\n"
-            "Никто не набрал большинства голосов. Ничья.",
-            parse_mode=ParseMode.MARKDOWN)
+    if top and top[0][1] >= 2:
+        max_votes = top[0][1]
+        candidates = [tid for tid, cnt in top if cnt == max_votes]
+        if len(candidates) == 1:
+            eliminated_id = candidates[0]
+            p = game.players[eliminated_id]
+            p.alive = False
+            await _send_to_chat(
+                bot, game,
+                f"⚖️ *Голосование окончено*\n\n"
+                f"Изгнан: *{p.full_name}*\nРоль: *{ROLE_NAMES[p.role]}*",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+            
+    await _send_to_chat(bot, game,
+        "⚖️ *Голосование окончено*\n\nНичья или недостаточно голосов. Никто не изгнан.",
+        parse_mode=ParseMode.MARKDOWN)
 
 
 def _check_win(game):
