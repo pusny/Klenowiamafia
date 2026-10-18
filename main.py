@@ -71,9 +71,15 @@ def _init_db():
                 games INTEGER DEFAULT 0,
                 inventory TEXT DEFAULT '{}',
                 achievements TEXT DEFAULT '[]',
+                unlocked_titles TEXT DEFAULT '["Новичок"]',
                 last_bonus REAL DEFAULT 0
             );
         """)
+        
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(users_data)")}
+        if "unlocked_titles" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN unlocked_titles TEXT DEFAULT '[\"Новичок\"]'")
+            
         conn.commit()
 
 _init_db()
@@ -87,8 +93,12 @@ def db_get_user(user_id):
             conn.commit()
             row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
         d = dict(row)
-        d['inventory'] = json.loads(d['inventory'])
-        d['achievements'] = json.loads(d['achievements'])
+        d['inventory'] = json.loads(d['inventory'] or '{}')
+        d['achievements'] = json.loads(d['achievements'] or '[]')
+        d['unlocked_titles'] = json.loads(d.get('unlocked_titles') or '["Новичок"]')
+        
+        if d['title'] not in d['unlocked_titles']:
+            d['unlocked_titles'].append(d['title'])
         return d
 
 def db_save_user(user_id, **kwargs):
@@ -99,11 +109,11 @@ def db_save_user(user_id, **kwargs):
     with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
         conn.execute("""
             UPDATE users_data SET 
-                username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, last_bonus=?
+                username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?
             WHERE user_id=?
         """, (
             u['username'], u['coins'], u['level'], u['title'], u['wins'], u['games'],
-            json.dumps(u['inventory']), json.dumps(u['achievements']), u['last_bonus'], user_id
+            json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'], user_id
         ))
         conn.commit()
 
@@ -181,13 +191,13 @@ SHOP_ITEMS = {
 }
 
 TITLES_SHOP = {
-    "novice": {"name": "Новичок", "emoji": "🐣", "price": 0, "ach_req": 0},
-    "leaf_collector": {"name": "Собиратель листвы", "emoji": "🍁", "price": 50, "ach_req": 0},
-    "guardian": {"name": "Страж Клена", "emoji": "🌳", "price": 150, "ach_req": 0},
-    "king": {"name": "Осенний Король", "emoji": "👑", "price": 500, "ach_req": 0},
-    "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 3},
-    "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 6},
-    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 9},
+    "novice": {"name": "Новичок", "emoji": "🐣", "price": 0, "ach_req": 0, "daily_bonus": 5},
+    "leaf_collector": {"name": "Собиратель листвы", "emoji": "🍁", "price": 50, "ach_req": 0, "daily_bonus": 7},
+    "guardian": {"name": "Страж Клена", "emoji": "🌳", "price": 150, "ach_req": 0, "daily_bonus": 10},
+    "king": {"name": "Осенний Король", "emoji": "👑", "price": 500, "ach_req": 0, "daily_bonus": 20},
+    "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 3, "daily_bonus": 8},
+    "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 6, "daily_bonus": 12},
+    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 9, "daily_bonus": 25},
 }
 
 ALL_ACHIEVEMENTS = {
@@ -214,6 +224,7 @@ MAFIA_START_REGEX = re.compile(r"(?i)^мафия\s+(?:начать|старт)$"
 MAFIA_STOP_REGEX = re.compile(r"(?i)^мафия\s+(?:стоп|stop)$")
 
 CROCODILE_REGEX = re.compile(r"(?i)^/?(?:крокодил|слова|crocodile|words)(?:\s+(?:начать|старт))?$")
+CROCODILE_STOP_REGEX = re.compile(r"(?i)^/?(?:крокодил|слова|crocodile|words)\s+(?:стоп|stop)$")
 
 CROC_GAME = {}
 CROC_AWAITING = {}
@@ -403,7 +414,10 @@ async def cmd_dm_other(update, ctx):
         elif action == "give_title" and len(parts) >= 2:
             try:
                 target, title = int(parts[0].replace("@", "")), " ".join(parts[1:])
-                db_save_user(target, title=title)
+                u = db_get_user(target)
+                if title not in u['unlocked_titles']:
+                    u['unlocked_titles'].append(title)
+                db_save_user(target, title=title, unlocked_titles=u['unlocked_titles'])
                 await msg.reply_text(f"✅ Выдан титул '{title}' юзеру {target}")
             except: await msg.reply_text("❌ Ошибка.")
         return
@@ -453,6 +467,24 @@ async def cmd_crocodile(update, ctx):
         return await msg.reply_text("⛔ Только администратор чата может запустить Крокодила.")
         
     await msg.reply_text("🐊 *Крокодил*\nНажми кнопку, чтобы загадать слово.", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]]))
+
+async def cmd_crocodile_stop(update, ctx):
+    if not _check_thread(update): return
+    msg = update.effective_message
+    if not msg or msg.chat.type == "private": return
+    
+    if not await _is_chat_admin(ctx.bot, msg.chat.id, msg.from_user.id):
+        return await msg.reply_text("⛔ Только администратор чата может остановить игру.")
+        
+    if msg.chat.id in CROC_GAME:
+        CROC_GAME.pop(msg.chat.id, None)
+        await msg.reply_text("🛑 Игра в Крокодила остановлена.")
+    else:
+        await msg.reply_text("ℹ️ В этом чате нет активной игры в Крокодила.")
+        
+    to_remove = [uid for uid, cid in CROC_AWAITING.items() if cid == msg.chat.id]
+    for uid in to_remove:
+        del CROC_AWAITING[uid]
 
 async def cb_start_count(update, ctx):
     q = update.callback_query
@@ -751,25 +783,25 @@ async def cb_menu_titles(update, ctx):
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
     u = db_get_user(q.from_user.id)
-    current_title = u['title']
-    ach_count = len(u['achievements'])
     
-    text = f"👑 *Титулы*\n\nТекущий: *{current_title}*\nТвои достижения: `{ach_count}`\n\n"
+    text = f"👑 *Титулы*\n\nТекущий: *{u['title']}*\nТвои достижения: `{len(u['achievements'])}`\n\n"
     rows = []
     
     for tid, tdata in TITLES_SHOP.items():
         status = ""
-        if tdata['name'] == current_title:
+        if tdata['name'] == u['title']:
             status = " (Надет)"
+        elif tdata['name'] in u['unlocked_titles']:
+            status = " (Доступен)"
         elif tdata['ach_req'] > 0:
-            if ach_count >= tdata['ach_req']:
-                status = f" (Доступно за {tdata['ach_req']} ачивок)"
+            if len(u['achievements']) >= tdata['ach_req']:
+                status = f" (За {tdata['ach_req']} ачивок)"
             else:
                 status = f" (Нужно {tdata['ach_req']} ачивок)"
         else:
             status = f" — {tdata['price']}🍁"
         
-        rows.append([InlineKeyboardButton(f"{tdata['emoji']} {tdata['name']}{status}", callback_data=f"title:set:{chat_id}:{tid}")])
+        rows.append([InlineKeyboardButton(f"{tdata['emoji']} {tdata['name']}{status} (+{tdata['daily_bonus']}🍁)", callback_data=f"title:set:{chat_id}:{tid}")])
     
     rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")])
     await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
@@ -786,6 +818,11 @@ async def cb_title_set(update, ctx):
     u = db_get_user(q.from_user.id)
     if tdata['name'] == u['title']: return await q.answer("У тебя уже надет этот титул")
     
+    if tdata['name'] in u['unlocked_titles']:
+        db_save_user(q.from_user.id, title=tdata['name'])
+        await q.answer(f"Титул изменён на {tdata['name']}!")
+        return await cb_menu_titles(update, ctx)
+        
     if tdata['ach_req'] > 0:
         if len(u['achievements']) < tdata['ach_req']:
             return await q.answer(f"Нужно {tdata['ach_req']} достижений!", show_alert=True)
@@ -794,8 +831,9 @@ async def cb_title_set(update, ctx):
             return await q.answer("Недостаточно листиков!", show_alert=True)
         u['coins'] -= tdata['price']
         
-    db_save_user(q.from_user.id, coins=u['coins'], title=tdata['name'])
-    await q.answer(f"Титул изменён на {tdata['name']}!")
+    u['unlocked_titles'].append(tdata['name'])
+    db_save_user(q.from_user.id, coins=u['coins'], title=tdata['name'], unlocked_titles=u['unlocked_titles'])
+    await q.answer(f"Титул куплен и надет!")
     await cb_menu_titles(update, ctx)
 
 async def cb_menu_shop(update, ctx):
@@ -906,11 +944,18 @@ async def cb_menu_bonus(update, ctx):
     except: chat_id = 0
     u = db_get_user(q.from_user.id)
     if time.time() - u['last_bonus'] < 86400: return await q.answer("Бонус раз в сутки!", show_alert=True)
-    u['coins'] += 5
+    
+    bonus_amount = 5
+    for tid, tdata in TITLES_SHOP.items():
+        if tdata['name'] == u['title']:
+            bonus_amount = tdata['daily_bonus']
+            break
+            
+    u['coins'] += bonus_amount
     u['last_bonus'] = time.time()
     db_save_user(q.from_user.id, **u)
-    await q.answer("+5🍁")
-    await q.edit_message_text(f"🍁 *Бонус* +5🍁\nБаланс: {u['coins']}", parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
+    await q.answer(f"+{bonus_amount}🍁")
+    await q.edit_message_text(f"🍁 *Бонус* +{bonus_amount}🍁\nБаланс: {u['coins']}", parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
 
 async def cb_menu_top(update, ctx):
     q = update.callback_query
@@ -1008,6 +1053,7 @@ def _build_app():
     
     app.add_handler(CommandHandler("crocodile", cmd_crocodile, filters=g))
     app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(CROCODILE_REGEX), cmd_crocodile))
+    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(CROCODILE_STOP_REGEX), cmd_crocodile_stop))
 
     app.add_handler(CommandHandler("start", cmd_dm_start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("menu", cmd_dm_menu, filters=filters.ChatType.PRIVATE))
