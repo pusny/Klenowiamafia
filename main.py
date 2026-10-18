@@ -64,6 +64,10 @@ def _init_db():
                 chat_id INTEGER PRIMARY KEY,
                 key TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
             CREATE TABLE IF NOT EXISTS users_data (
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
@@ -92,9 +96,20 @@ def _init_db():
         if "city_wins" not in cols:
             conn.execute("ALTER TABLE users_data ADD COLUMN city_wins INTEGER DEFAULT 0")
             
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('casino_chance', '45')")
         conn.commit()
 
 _init_db()
+
+def db_get_setting(key, default=""):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        row = conn.execute("SELECT value FROM bot_settings WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+def db_set_setting(key, value):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, str(value)))
+        conn.commit()
 
 def get_safe_name(user_or_player):
     if hasattr(user_or_player, 'full_name'):
@@ -234,15 +249,15 @@ SHOP_ITEMS = {
 TITLES_SHOP = {
     "novice": {"name": "Новичок", "emoji": "🐣", "price": 0, "ach_req": 0, "daily_bonus": 5},
     "leaf_collector": {"name": "Собиратель листвы", "emoji": "🍁", "price": 50, "ach_req": 0, "daily_bonus": 7},
-    "guardian": {"name": "Страж Клена", "emoji": "🌳", "price": 150, "ach_req": 0, "daily_bonus": 10},
-    "king": {"name": "Осенний Король", "emoji": "👑", "price": 500, "ach_req": 0, "daily_bonus": 20},
-    "donater": {"name": "Меценат", "emoji": "💎", "price": 1000, "ach_req": 0, "daily_bonus": 30},
-    "rich_boy": {"name": "Золотой Скрудж", "emoji": "💰", "price": 2500, "ach_req": 0, "daily_bonus": 50},
+    "guardian": {"name": "Страж Клена", "emoji": "🌳", "price": 150, "ach_req": 0, "daily_bonus": 12},
+    "king": {"name": "Осенний Король", "emoji": "👑", "price": 400, "ach_req": 0, "daily_bonus": 25},
+    "donater": {"name": "Меценат", "emoji": "💎", "price": 700, "ach_req": 0, "daily_bonus": 40},
+    "rich_boy": {"name": "Золотой Скрудж", "emoji": "💰", "price": 1200, "ach_req": 0, "daily_bonus": 70},
     
     "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 5, "daily_bonus": 15},
     "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 10, "daily_bonus": 25},
-    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 15, "daily_bonus": 40},
-    "god": {"name": "Божество Клена", "emoji": "🌌", "price": 0, "ach_req": 20, "daily_bonus": 60},
+    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 15, "daily_bonus": 45},
+    "god": {"name": "Божество Клена", "emoji": "🌌", "price": 0, "ach_req": 20, "daily_bonus": 80},
 }
 
 ALL_ACHIEVEMENTS = {
@@ -283,6 +298,7 @@ CROC_GAME = {}
 CROC_AWAITING = {}
 CROC_ACTIVE = set()
 ADMIN_STATE = {}
+CASINO_AWAITING = set()
 
 def get_roles(count):
     spec = ROLE_DISTRIBUTION.get(count)
@@ -421,7 +437,8 @@ def _menu_main_kb(user_id, chat_id=0):
         [InlineKeyboardButton("👤 Профиль", callback_data=f"menu:profile:{chat_id}"), InlineKeyboardButton("🛒 Магазин", callback_data=f"menu:shop:{chat_id}")],
         [InlineKeyboardButton("🎒 Инвентарь", callback_data=f"menu:inv:{chat_id}"), InlineKeyboardButton("🏆 Топ", callback_data=f"menu:top:{chat_id}")],
         [InlineKeyboardButton("🏅 Достижения", callback_data=f"menu:ach:{chat_id}"), InlineKeyboardButton("🍁 Бонус", callback_data=f"menu:bonus:{chat_id}")],
-        [InlineKeyboardButton("👑 Титулы", callback_data=f"menu:titles:{chat_id}"), InlineKeyboardButton("💎 Купить 🍁", callback_data=f"menu:buy:{chat_id}")]
+        [InlineKeyboardButton("👑 Титулы", callback_data=f"menu:titles:{chat_id}"), InlineKeyboardButton("🎰 Казино", callback_data=f"menu:casino:{chat_id}")],
+        [InlineKeyboardButton("💎 Купить 🍁", callback_data=f"menu:buy:{chat_id}")]
     ]
     if user_id == ADMIN_ID:
         rows.append([InlineKeyboardButton("🛠 Админ-панель", callback_data="admin:main")])
@@ -449,6 +466,46 @@ async def cmd_dm_other(update, ctx):
     uid = update.effective_user.id
     db_get_user(uid, update.effective_user)
     
+    if uid in CASINO_AWAITING:
+        CASINO_AWAITING.discard(uid)
+        try:
+            bet = int(msg.text.strip())
+            if bet < 1: raise ValueError
+        except ValueError:
+            await msg.reply_text("❌ Неверная сумма. Введи целое число больше 0.", reply_markup=_menu_main_kb(uid))
+            return
+            
+        u = db_get_user(uid, msg.from_user)
+        if u['coins'] < bet:
+            await msg.reply_text(f"❌ У тебя только {u['coins']}🍁.", reply_markup=_menu_main_kb(uid))
+            return
+            
+        chance = int(db_get_setting("casino_chance", "45"))
+        u['coins'] -= bet
+        
+        roll = random.randint(1, 100)
+        if roll <= chance:
+            win = bet * 2
+            u['coins'] += win
+            db_save_user(uid, **u)
+            await msg.reply_text(
+                f"🎆🎇🎉 *ПОБЕДА!* 🎉🎇🎆\n\n"
+                f"Ты выиграл *{win}🍁*!\n"
+                f"Твой баланс: *{u['coins']}🍁*",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=_menu_main_kb(uid)
+            )
+        else:
+            db_save_user(uid, **u)
+            await msg.reply_text(
+                f"💀 *Проигрыш...*\n\n"
+                f"Ты потерял *{bet}🍁*.\n"
+                f"Твой баланс: *{u['coins']}🍁*",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=_menu_main_kb(uid)
+            )
+        return
+
     if uid in ADMIN_STATE:
         action = ADMIN_STATE.pop(uid)
         parts = msg.text.split(maxsplit=2)
@@ -476,6 +533,14 @@ async def cmd_dm_other(update, ctx):
                 await msg.reply_text(f"✅ Выдан титул '{title}' юзеру {target}")
             except Exception as e: 
                 await msg.reply_text(f"❌ Ошибка: {e}")
+        elif action == "casino_chance":
+            try:
+                chance = int(parts[0])
+                if chance < 1 or chance > 99: raise ValueError
+                db_set_setting("casino_chance", str(chance))
+                await msg.reply_text(f"✅ Шанс победы в казино теперь: {chance}%")
+            except:
+                await msg.reply_text("❌ Ошибка. Введи число от 1 до 99.")
         return
 
     if uid in CROC_AWAITING:
@@ -782,12 +847,12 @@ async def _announce_end(bot, game):
         
         u = db_get_user(p.user_id)
         u['games'] += 1
-        reward = 2
+        reward = 1
         
         won = (game.winner == "city" and ROLE_TEAM[p.role] == "city") or (game.winner == "mafia" and ROLE_TEAM[p.role] == "mafia")
         if won:
             u['wins'] += 1
-            reward = 10 if game.winner == "city" else 15
+            reward = 5 if game.winner == "city" else 8
             if "first_win" not in u['achievements']: u['achievements'].append("first_win")
             
             if game.winner == "mafia":
@@ -1119,6 +1184,24 @@ async def cb_menu_buy(update, ctx):
     await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
     await q.answer()
 
+async def cb_menu_casino(update, ctx):
+    q = update.callback_query
+    if not q: return
+    u = db_get_user(q.from_user.id, q.from_user)
+    chance = db_get_setting("casino_chance", "45")
+    
+    CASINO_AWAITING.add(q.from_user.id)
+    
+    text = (
+        f"🎰 *Казино*\n\n"
+        f"Твой баланс: *{u['coins']}🍁*\n"
+        f"Шанс победы: *{chance}%*\n"
+        f"Выплата при победе: *x2*\n\n"
+        f"Введи сумму ставки (целое число от 1🍁):"
+    )
+    await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(0))
+    await q.answer()
+
 async def cb_admin_main(update, ctx):
     q = update.callback_query
     if q.from_user.id != ADMIN_ID: return await q.answer("Нет доступа", show_alert=True)
@@ -1126,6 +1209,7 @@ async def cb_admin_main(update, ctx):
         [InlineKeyboardButton("🍁 Выдать листики", callback_data="admin:act:give_coins")],
         [InlineKeyboardButton("⭐ Выдать уровень", callback_data="admin:act:give_level")],
         [InlineKeyboardButton("👑 Выдать титул", callback_data="admin:act:give_title")],
+        [InlineKeyboardButton("🎰 Настройки Казино", callback_data="admin:casino")],
         [InlineKeyboardButton("👥 Список юзеров", callback_data="admin:users")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu:main:0")]
     ])
@@ -1142,6 +1226,22 @@ async def cb_admin_act(update, ctx):
         "give_title": "Отправь: `ID Титул`"
     }
     await q.edit_message_text(f"🛠 {prompts[act]}", parse_mode=ParseMode.MARKDOWN)
+    await q.answer()
+
+async def cb_admin_casino(update, ctx):
+    q = update.callback_query
+    chance = db_get_setting("casino_chance", "45")
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Изменить шанс", callback_data="admin:casino_set")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="admin:main")]
+    ])
+    await q.edit_message_text(f"🎰 *Настройки Казино*\n\nТекущий шанс победы: *{chance}%*", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    await q.answer()
+
+async def cb_admin_casino_set(update, ctx):
+    q = update.callback_query
+    ADMIN_STATE[q.from_user.id] = "casino_chance"
+    await q.edit_message_text("🛠 Отправь новый шанс победы в процентах (от 1 до 99):")
     await q.answer()
 
 async def cb_admin_users(update, ctx):
@@ -1179,7 +1279,7 @@ async def croc_guess_mw(update, ctx):
         except: pass
         
         u = db_get_user(msg.from_user.id, msg.from_user)
-        u['coins'] += 10
+        u['coins'] += 5
         u['croc_wins'] += 1
         
         if "croc_1" not in u['achievements']: u['achievements'].append("croc_1")
@@ -1189,11 +1289,11 @@ async def croc_guess_mw(update, ctx):
         db_save_user(msg.from_user.id, **u)
         
         try:
-            await ctx.bot.send_message(msg.from_user.id, f"🐊 Ты угадал слово <b>{game['word']}</b>!\nНаграда: +10🍁", parse_mode=ParseMode.HTML)
+            await ctx.bot.send_message(msg.from_user.id, f"🐊 Ты угадал слово <b>{game['word']}</b>!\nНаграда: +5🍁", parse_mode=ParseMode.HTML)
         except: pass
         
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]])
-        await msg.reply_text(f"🎉 <b>{get_safe_name(msg.from_user)}</b> угадал слово <b>{game['word']}</b>!\nНаграда: +10🍁\n\nЗагадай следующее:", parse_mode=ParseMode.HTML, reply_markup=kb)
+        await msg.reply_text(f"🎉 <b>{get_safe_name(msg.from_user)}</b> угадал слово <b>{game['word']}</b>!\nНаграда: +5🍁\n\nЗагадай следующее:", parse_mode=ParseMode.HTML, reply_markup=kb)
         raise ApplicationHandlerStop
     else:
         try: await msg.set_reaction("❌")
@@ -1247,6 +1347,7 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_menu_top, pattern=r"^menu:top:"))
     app.add_handler(CallbackQueryHandler(cb_menu_bonus, pattern=r"^menu:bonus:"))
     app.add_handler(CallbackQueryHandler(cb_menu_buy, pattern=r"^menu:buy:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_casino, pattern=r"^menu:casino:"))
     
     app.add_handler(CallbackQueryHandler(cb_shop_item, pattern=r"^shop:item:"))
     app.add_handler(CallbackQueryHandler(cb_shop_buy, pattern=r"^shop:buy:"))
@@ -1255,6 +1356,8 @@ def _build_app():
     
     app.add_handler(CallbackQueryHandler(cb_admin_main, pattern=r"^admin:main$"))
     app.add_handler(CallbackQueryHandler(cb_admin_act, pattern=r"^admin:act:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_casino, pattern=r"^admin:casino$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_casino_set, pattern=r"^admin:casino_set$"))
     app.add_handler(CallbackQueryHandler(cb_admin_users, pattern=r"^admin:users$"))
     
     app.add_handler(CallbackQueryHandler(cb_croc_new, pattern=r"^croc:new$"))
