@@ -4,11 +4,13 @@ import os
 import random
 import re
 import secrets
+import shutil
 import sqlite3
 import string
 import time
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -39,7 +41,20 @@ logging.basicConfig(
 log = logging.getLogger("mafia")
 log.info("THREAD_ID mode: %s", THREAD_ID if THREAD_ID else "ALL THREADS")
 
-DB_PATH = "mafia.db"
+DB_DIR = Path(os.getenv("DATA_DIR", "."))
+DB_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = str(DB_DIR / "mafia.db")
+
+_old_db = Path("mafia.db")
+if _old_db.exists() and _old_db.absolute() != Path(DB_PATH).absolute():
+    if not Path(DB_PATH).exists():
+        shutil.copy2(_old_db, DB_PATH)
+        for suffix in ("-wal", "-shm"):
+            old_f = Path(str(_old_db) + suffix)
+            if old_f.exists():
+                shutil.copy2(old_f, str(DB_PATH) + suffix)
+
+log.info("DB path: %s", DB_PATH)
 
 
 def _init_db():
