@@ -794,10 +794,17 @@ async def cb_join(update, ctx):
         [InlineKeyboardButton("❌ Отменить", callback_data="mc")],
     ])
     try:
-        await ctx.bot.edit_message_reply_markup(
-            chat_id=chat.id, message_id=game.join_message_id, reply_markup=kb)
+        await ctx.bot.edit_message_text(
+            chat_id=chat.id,
+            message_id=game.join_message_id,
+            text=f"🍁 *Кленовая мафия* — набор\n\n"
+                 f"Нужно: *{game.total}*\nНабрано: *{n}/{game.total}*\n\n"
+                 f"❗ Каждому нажать /start в личке с ботом.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb,
+        )
     except Exception as e:
-        log.debug("edit join kb fail: %s", e)
+        log.debug("edit join msg fail: %s", e)
     await q.answer(f"Ты в игре ({n}/{game.total})")
 
 
