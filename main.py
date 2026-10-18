@@ -151,7 +151,6 @@ def db_get_user(user_id, tg_user=None):
         d['mafia_wins'] = int(d.get('mafia_wins') or 0)
         d['city_wins'] = int(d.get('city_wins') or 0)
         
-        # Пересчитываем уровень на основе опыта
         total_xp = d['wins'] * 2 + d['games'] + d['croc_wins']
         d['level'] = total_xp // 5 + 1
         
@@ -1166,22 +1165,30 @@ async def cb_menu_top(update, ctx):
     
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        rows_coins = conn.execute("SELECT user_id, coins FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
-        rows_level = conn.execute("SELECT user_id, level FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
+        rows_coins = conn.execute("SELECT user_id, username, coins FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
+        rows_level = conn.execute("SELECT user_id, username, level FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
         
-    lines = ["🏆 *Топ по листикам*:", ""]
+    lines = ["🏆 <b>Топ по листикам:</b>", ""]
     if rows_coins:
         for i, r in enumerate(rows_coins, 1):
-            link = f'<a href="tg://user?id={r["user_id"]}">👤 Профиль</a>'
+            uname = r['username']
+            if uname:
+                link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>'
+            else:
+                link = f'👤 Игрок {r["user_id"]}'
             lines.append(f"{i}. {link} — {r['coins']}🍁")
     else:
         lines.append("Пока пусто.")
         
-    lines.append("\n⭐ *Топ по уровню*:")
+    lines.append("\n⭐ <b>Топ по уровню:</b>")
     lines.append("")
     if rows_level:
         for i, r in enumerate(rows_level, 1):
-            link = f'<a href="tg://user?id={r["user_id"]}">👤 Профиль</a>'
+            uname = r['username']
+            if uname:
+                link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>'
+            else:
+                link = f'👤 Игрок {r["user_id"]}'
             lines.append(f"{i}. {link} — {r['level']} lvl")
     else:
         lines.append("Пока пусто.")
@@ -1270,10 +1277,11 @@ async def cb_admin_users(update, ctx):
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT user_id, username, level FROM users_data").fetchall()
-    lines = ["👥 *Юзеры*:"]
+    lines = ["👥 <b>Юзеры:</b>"]
     for r in rows[:50]:
-        lines.append(f"`{r['user_id']}` {html.escape(r['username'] or 'Аноним')} (lvl {r['level']})")
-    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(0))
+        uname = html.escape(r['username'] or 'Аноним')
+        lines.append(f"<code>{r['user_id']}</code> {uname} (lvl {r['level']})")
+    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
     await q.answer()
 
 async def cb_croc_new(update, ctx):
