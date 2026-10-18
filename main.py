@@ -1,24 +1,23 @@
 import asyncio
-import json
 import logging
 import os
 import random
 import re
 import secrets
+import sqlite3
 import string
 import time
 from collections import Counter
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
+from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import (
     Application, ApplicationHandlerStop, CallbackQueryHandler,
-    ChatMemberHandler, CommandHandler, MessageHandler, TypeHandler,
-    filters, ContextTypes
+    ChatMemberHandler, CommandHandler, MessageHandler, filters, ContextTypes
 )
 
 load_dotenv()
@@ -40,66 +39,91 @@ logging.basicConfig(
 log = logging.getLogger("mafia")
 log.info("THREAD_ID mode: %s", THREAD_ID if THREAD_ID else "ALL THREADS")
 
-ACTIVATION_FILE = Path("activations.json")
+DB_PATH = "mafia.db"
 
 
-def _load_activations():
-    if not ACTIVATION_FILE.exists():
-        return {}
-    try:
-        return json.loads(ACTIVATION_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+def _init_db():
+    with sqlite3.connect(DB_PATH, timeout=15.0) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS activations (
+                chat_id INTEGER PRIMARY KEY
+            );
+            CREATE TABLE IF NOT EXISTS pending_activations (
+                chat_id INTEGER PRIMARY KEY,
+                key TEXT NOT NULL
+            );
+        """)
+        conn.commit()
 
 
-def _save_activations(data):
-    try:
-        ACTIVATION_FILE.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+def is_chat_activated(chat_id):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM activations WHERE chat_id=?", (chat_id,)
+        ).fetchone()
+        return row is not None
+
+
+def activate_chat(chat_id):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO activations (chat_id) VALUES (?)", (chat_id,)
         )
-    except Exception as e:
-        log.error("save activations fail: %s", e)
+        conn.commit()
 
 
-ACTIVATIONS = _load_activations()
+def get_pending_key(chat_id):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        row = conn.execute(
+            "SELECT key FROM pending_activations WHERE chat_id=?", (chat_id,)
+        ).fetchone()
+        return row[0] if row else None
+
+
+def set_pending_key(chat_id, key):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO pending_activations (chat_id, key) VALUES (?, ?)",
+            (chat_id, key),
+        )
+        conn.commit()
+
+
+def clear_pending_key(chat_id):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute(
+            "DELETE FROM pending_activations WHERE chat_id=?", (chat_id,)
+        )
+        conn.commit()
 
 
 def _gen_key():
     alphabet = string.ascii_uppercase + string.digits
-    return "-".join("".join(secrets.choice(alphabet) for _ in range(4))
-                    for _ in range(2))
+    return "".join(secrets.choice(alphabet) for _ in range(12))
 
 
-def is_chat_activated(chat_id):
-    entry = ACTIVATIONS.get(str(chat_id))
-    return bool(entry and entry.get("active"))
+def _log_activation_key(chat_id, chat_title, key):
+    bar = "=" * 60
+    log.warning(bar)
+    log.warning("  KEY ACTIVATION")
+    log.warning("  Chat: %s (%s)", chat_title, chat_id)
+    log.warning("  Key:  %s", key)
+    log.warning("  Usage in chat: активация %s", key)
+    log.warning(bar)
+    try:
+        print(bar, flush=True)
+        print("  KEY ACTIVATION", flush=True)
+        print(f"  Chat: {chat_title} ({chat_id})", flush=True)
+        print(f"  Key:  {key}", flush=True)
+        print(f"  Usage in chat: активация {key}", flush=True)
+        print(bar, flush=True)
+    except Exception:
+        pass
 
 
-def set_pending_key(chat_id, key):
-    ACTIVATIONS[str(chat_id)] = {"key": key, "active": False}
-    _save_activations(ACTIVATIONS)
-
-
-def activate_chat_entry(chat_id):
-    entry = ACTIVATIONS.get(str(chat_id))
-    if entry:
-        entry["active"] = True
-        _save_activations(ACTIVATIONS)
-
-
-def _print_pending_on_startup():
-    pending = [(cid, e["key"]) for cid, e in ACTIVATIONS.items()
-               if not e.get("active")]
-    if pending:
-        log.warning("=" * 60)
-        log.warning("  PENDING ACTIVATIONS (%d):", len(pending))
-        for cid, key in pending:
-            log.warning("  chat %s → key %s", cid, key)
-        log.warning("=" * 60)
-
-
-_print_pending_on_startup()
+_init_db()
 
 ROLE_NAMES = {
     "mafia": "Тень", "cop": "Смотритель", "doctor": "Лекарь",
@@ -126,11 +150,15 @@ _ROLE_MAP = {"M": "mafia", "C": "cop", "D": "doctor", "B": "bartender",
              "W": "whore", "N": "medium", "G": "citizen"}
 
 ROLE_DISTRIBUTION = {
-    2:  "M G", 3: "M C G", 4: "M C D G",
-    5:  "M C G G G", 6: "M C D G G G", 7: "M M C D G G G",
-    8:  "M M C D B G G G", 9: "M M C D B W G G G",
-    10: "M M M C D B W G G G", 11: "M M M C D B W N G G G",
-    12: "M M M C D B W N G G G G", 13: "M M M M C D B W N G G G G",
+    5:  "M C G G G",
+    6:  "M C D G G G",
+    7:  "M M C D G G G",
+    8:  "M M C D B G G G",
+    9:  "M M C D B W G G G",
+    10: "M M M C D B W G G G",
+    11: "M M M C D B W N G G G",
+    12: "M M M C D B W N G G G G",
+    13: "M M M M C D B W N G G G G",
     14: "M M M M C D B W N G G G G G",
     15: "M M M M C D B W N G G G G G G",
     16: "M M M M M C D B W N G G G G G G",
@@ -157,9 +185,9 @@ DAY_DISCUSSION_SEC = 180
 VOTE_DURATION_SEC = 60
 MUTE_DURATION_SEC = 5 * 60
 
-ACTIVATION_CMD_REGEX = re.compile(r"(?i)^(?:/)?(?:активация|activate)(?:\s+(\S+))?$")
-ACTIVATION_BYPASS = re.compile(r"(?i)^(?:/)?(?:активация|activate)(?:\s+\S+)?$")
-THREADID_CMD = re.compile(r"(?i)^/threadid$")
+ACTIVATION_REGEX = re.compile(r"(?i)^(?:/)?(?:активация|activate)(?:\s+\S+)?$")
+MAFIA_START_REGEX = re.compile(r"(?i)^мафия\s+(?:начать|старт)$")
+MAFIA_STOP_REGEX = re.compile(r"(?i)^мафия\s+(?:стоп|stop)$")
 
 
 def get_roles(count):
@@ -225,6 +253,24 @@ class Game:
 
 
 GAMES = {}
+USER_GAMES = {}
+
+
+def _register_user_game(user_id, chat_id):
+    USER_GAMES.setdefault(user_id, set()).add(chat_id)
+
+
+def _unregister_user_game(user_id, chat_id):
+    s = USER_GAMES.get(user_id)
+    if s:
+        s.discard(chat_id)
+        if not s:
+            USER_GAMES.pop(user_id, None)
+
+
+def _unregister_all_in_chat(chat_id):
+    for uid in list(USER_GAMES.keys()):
+        _unregister_user_game(uid, chat_id)
 
 
 def _check_thread(update):
@@ -261,42 +307,16 @@ async def _send_to_chat(bot, game, text, **kwargs):
     return await bot.send_message(game.chat_id, text, **kwargs)
 
 
-def _menu_main_kb(chat_id):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👤 Профиль", callback_data=f"menu:profile:{chat_id}"),
-         InlineKeyboardButton("🛒 Магазин", callback_data=f"menu:shop:{chat_id}")],
-        [InlineKeyboardButton("🎒 Инвентарь", callback_data=f"menu:inv:{chat_id}"),
-         InlineKeyboardButton("🏆 Топ", callback_data=f"menu:top:{chat_id}")],
-        [InlineKeyboardButton("🍁 Бонус", callback_data=f"menu:bonus:{chat_id}")],
-    ])
-
-
-def _menu_back_kb(chat_id):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")],
-    ])
-
-
-def _menu_text(p):
-    return f"🍁 *Меню* {p.full_name}\n\nБаланс: *{p.coins}🍁*"
-
-
-def _menu_open_kb(chat_id):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🍁 Меню", callback_data=f"openmenu:{chat_id}")],
-    ])
-
-
-async def activation_gate(update, ctx):
+async def activation_mw(update, ctx):
     msg = update.effective_message
     if msg is None or msg.chat.type == "private":
         return
     if is_chat_activated(msg.chat.id):
         return
     text = (msg.text or "").strip()
-    if ACTIVATION_BYPASS.match(text):
+    if ACTIVATION_REGEX.match(text):
         return
-    if THREADID_CMD.match(text):
+    if text.lower().startswith("/threadid"):
         return
     raise ApplicationHandlerStop
 
@@ -308,42 +328,37 @@ async def on_bot_added(update, ctx):
     me = await ctx.bot.get_me()
     if cm.new_chat_member.user.id != me.id:
         return
-    if cm.new_chat_member.status not in ("member", "administrator"):
+    old_s = cm.old_chat_member.status
+    new_s = cm.new_chat_member.status
+    if not (old_s in ("left", "kicked")
+            and new_s in ("member", "administrator", "restricted")):
         return
-    if cm.old_chat_member.status not in ("left", "kicked"):
+    if cm.chat.type == "private":
         return
     chat_id = cm.chat.id
-    title = cm.chat.title or cm.chat.full_name or str(chat_id)
     if is_chat_activated(chat_id):
         try:
-            await ctx.bot.send_message(chat_id, "🍁 Этот чат уже активирован.")
+            await ctx.bot.send_message(
+                chat_id, "🍁 Этот чат уже активирован. Пиши «мафия начать»."
+            )
         except Exception:
             pass
         return
-    entry = ACTIVATIONS.get(str(chat_id))
-    if entry and entry.get("key"):
-        key = entry["key"]
-    else:
-        key = _gen_key()
-        set_pending_key(chat_id, key)
-    try:
-        print("=" * 60, flush=True)
-        print(f"  АКТИВАЦИЯ ЧАТА", flush=True)
-        print(f"  Чат: {title} ({chat_id})", flush=True)
-        print(f"  Ключ: {key}", flush=True)
-        print(f"  Введи в чате: активация {key}", flush=True)
-        print("=" * 60, flush=True)
-    except Exception:
-        pass
-    log.warning("ACTIVATION KEY | chat=%s (%s) | key=%s", chat_id, title, key)
+    existing = get_pending_key(chat_id)
+    if existing:
+        return
+    key = _gen_key()
+    set_pending_key(chat_id, key)
+    title = cm.chat.title or cm.chat.full_name or str(chat_id)
+    _log_activation_key(chat_id, title, key)
     try:
         await ctx.bot.send_message(
             chat_id,
             "🍁 Спасибо за добавление!\n\n"
-            "Чтобы активировать бота в этом чате:\n"
-            "1. Зайди в консоль хостинга — там будет ключ вида <code>XXXX-YYYY</code>\n"
-            "2. Отправь в чат: <code>активация XXXX-YYYY</code>\n\n"
-            "Без активации бот не реагирует ни на какие команды.",
+            "Чтобы активировать бота:\n"
+            "1. Зайди в консоль хостинга — там будет ключ из 12 символов\n"
+            "2. Отправь в чат: <code>активация КЛЮЧ</code>\n\n"
+            "Без активации бот не реагирует ни на что.",
             parse_mode=ParseMode.HTML,
         )
     except Exception:
@@ -353,41 +368,74 @@ async def on_bot_added(update, ctx):
 async def cmd_activate(update, ctx):
     msg = update.effective_message
     user = update.effective_user
-    chat = update.effective_chat
-    if not msg or not user or not chat or chat.type == "private":
+    if msg is None or user is None or msg.chat.type == "private":
         return
-    if is_chat_activated(chat.id):
-        await msg.reply_text("✅ Этот чат уже активирован.")
-        return
-    if not await _is_chat_admin(ctx.bot, chat.id, user.id):
-        await msg.reply_text("⛔ Только администратор может активировать.")
+    chat_id = msg.chat.id
+    if is_chat_activated(chat_id):
+        try:
+            await msg.delete()
+        except Exception:
+            pass
         return
     text = (msg.text or "").strip()
-    m = ACTIVATION_CMD_REGEX.match(text)
-    if not m or not m.group(1):
-        await msg.reply_text(
-            "Формат: <code>активация КЛЮЧ</code>\n\n"
-            "Ключ выводится в консоль хостинга при добавлении бота.\n"
-            "Если потерял — перезапусти бота, он покажет все ожидающие ключи.",
-            parse_mode=ParseMode.HTML,
-        )
+    low = text.lower().lstrip("/")
+    parts = low.split()
+    if len(parts) < 2:
+        is_admin = await _is_chat_admin(ctx.bot, chat_id, user.id)
+        if not is_admin:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            return
+        existing = get_pending_key(chat_id)
+        if existing:
+            key = existing
+        else:
+            key = _gen_key()
+            set_pending_key(chat_id, key)
+        title = msg.chat.title or msg.chat.full_name or str(chat_id)
+        _log_activation_key(chat_id, title, key)
+        try:
+            await msg.delete()
+        except Exception:
+            pass
         return
-    entered = m.group(1).strip().upper()
-    entry = ACTIVATIONS.get(str(chat.id))
-    if not entry or not entry.get("key"):
-        await msg.reply_text("❌ Нет ключа для этого чата. Перезапусти бота.")
+    entered = parts[1].strip().upper()
+    pending = get_pending_key(chat_id)
+    if not pending:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
         return
-    if entered != entry["key"].upper():
-        await msg.reply_text("❌ Неверный ключ.")
+    if entered != pending.upper():
+        try:
+            await msg.delete()
+        except Exception:
+            pass
         return
-    activate_chat_entry(chat.id)
-    await msg.reply_text(
-        "✅ Чат активирован! 🍁\n\n"
-        "Запуск игры: <code>мафия начать</code>\n"
-        "Тест от 2: <code>мафия тест</code>\n"
+    activate_chat(chat_id)
+    clear_pending_key(chat_id)
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+    log.info("Чат %s (%s) активирован пользователем %s",
+             chat_id, msg.chat.title or "?", user.id)
+    note = await ctx.bot.send_message(
+        chat_id,
+        "✅ <b>Чат активирован!</b>\n\n"
+        "🍁 <i>Кленовая мафия</i>\n"
+        "Запуск: <code>мафия начать</code>\n"
         "ID ветки: <code>/threadid</code>",
         parse_mode=ParseMode.HTML,
     )
+    await asyncio.sleep(30)
+    try:
+        await note.delete()
+    except Exception:
+        pass
 
 
 async def guard_muted_messages(update, ctx):
@@ -418,9 +466,35 @@ async def guard_muted_messages(update, ctx):
     raise ApplicationHandlerStop
 
 
-def _make_count_kb(prefix="ms", min_count=5):
-    buttons = [InlineKeyboardButton(str(i), callback_data=f"{prefix}:{i}")
-               for i in range(min_count, 21)]
+def _menu_main_kb(chat_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👤 Профиль", callback_data=f"menu:profile:{chat_id}"),
+         InlineKeyboardButton("🛒 Магазин", callback_data=f"menu:shop:{chat_id}")],
+        [InlineKeyboardButton("🎒 Инвентарь", callback_data=f"menu:inv:{chat_id}"),
+         InlineKeyboardButton("🏆 Топ", callback_data=f"menu:top:{chat_id}")],
+        [InlineKeyboardButton("🍁 Бонус", callback_data=f"menu:bonus:{chat_id}")],
+    ])
+
+
+def _menu_back_kb(chat_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")],
+    ])
+
+
+def _menu_text(p):
+    return f"🍁 *Меню* {p.full_name}\n\nБаланс: *{p.coins}🍁*"
+
+
+def _menu_open_kb(chat_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🍁 Меню", callback_data=f"openmenu:{chat_id}")],
+    ])
+
+
+def _make_count_kb():
+    buttons = [InlineKeyboardButton(str(i), callback_data=f"ms:{i}")
+               for i in range(5, 21)]
     rows = [buttons[i:i + 5] for i in range(0, len(buttons), 5)]
     return InlineKeyboardMarkup(rows)
 
@@ -430,10 +504,16 @@ async def cmd_threadid(update, ctx):
     if msg is None or msg.chat.type == "private":
         return
     tid = msg.message_thread_id or 0
-    await msg.reply_text(
+    note = await msg.reply_text(
         f"chat_id: <code>{msg.chat.id}</code>\nthread_id: <code>{tid}</code>",
         parse_mode=ParseMode.HTML,
     )
+    await asyncio.sleep(30)
+    try:
+        await note.delete()
+        await msg.delete()
+    except Exception:
+        pass
 
 
 async def cmd_menu(update, ctx):
@@ -452,6 +532,7 @@ async def cmd_menu(update, ctx):
     if not p:
         await msg.reply_text("🍁 Ты не в игре.")
         return
+    _register_user_game(user.id, chat.id)
     try:
         await ctx.bot.send_message(
             user.id, _menu_text(p),
@@ -466,6 +547,94 @@ async def cmd_menu(update, ctx):
         await msg.reply_text("⚠️ Сначала нажми /start в личке с ботом!")
 
 
+async def cmd_dm_start(update, ctx):
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    chat_ids = USER_GAMES.get(user.id, set())
+    active = [cid for cid in chat_ids if cid in GAMES]
+    if active:
+        await _open_menu_for_user(ctx.bot, msg, user.id, active)
+        return
+    await msg.reply_text(
+        "🍁 Это бот «Кленовая мафия».\n\n"
+        "Как начать:\n"
+        "• В группе попроси админа написать <code>мафия начать</code>\n"
+        "• Нажми «🎮 Играть»\n"
+        "• Роль и меню придут сюда\n\n"
+        "Если ты уже в игре — /menu.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_dm_menu(update, ctx):
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    chat_ids = USER_GAMES.get(user.id, set())
+    active = [cid for cid in chat_ids if cid in GAMES]
+    if not active:
+        await msg.reply_text(
+            "🍁 Ты не в активной игре.\n\n"
+            "Зайди в чат, нажми «🎮 Играть» — и меню откроется здесь."
+        )
+        return
+    await _open_menu_for_user(ctx.bot, msg, user.id, active)
+
+
+async def _open_menu_for_user(bot, msg, user_id, chat_ids):
+    if len(chat_ids) == 1:
+        cid = chat_ids[0]
+        game = GAMES.get(cid)
+        p = game.players.get(user_id) if game else None
+        if not p:
+            await msg.reply_text("🍁 Ты не в этой игре.")
+            return
+        try:
+            await bot.send_message(
+                user_id, _menu_text(p),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=_menu_main_kb(cid),
+            )
+        except Exception:
+            await msg.reply_text("⚠️ Не смог открыть меню.")
+        return
+    rows = []
+    for cid in chat_ids:
+        game = GAMES.get(cid)
+        if not game:
+            continue
+        p = game.players.get(user_id)
+        if not p:
+            continue
+        rows.append([InlineKeyboardButton(
+            f"🍁 Игра в чате {cid} ({ROLE_NAMES[p.role]})",
+            callback_data=f"dmpick:{cid}")])
+    if not rows:
+        await msg.reply_text("🍁 Нет активных игр.")
+        return
+    await msg.reply_text(
+        "🍁 Ты в нескольких играх. Выбери меню:",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def cmd_dm_other(update, ctx):
+    msg = update.effective_message
+    if not msg:
+        return
+    text = (msg.text or "").strip()
+    if not text or text.startswith("/"):
+        return
+    await msg.reply_text(
+        "🍁 Управление кнопками.\n\n"
+        "/menu — меню (если ты в игре)\n"
+        "/start — инструкция",
+    )
+
+
 async def cmd_mafia_start(update, ctx):
     if not _check_thread(update):
         return
@@ -475,7 +644,7 @@ async def cmd_mafia_start(update, ctx):
     if not msg or not user or not chat or chat.type == "private":
         return
     if not await _is_chat_admin(ctx.bot, chat.id, user.id):
-        await msg.reply_text("⛔ Только администратор чата может запустить игру.")
+        await msg.reply_text("⛔ Только администратор чата.")
         return
     if chat.id in GAMES:
         await msg.reply_text("⚠️ В этом чате уже идёт игра.")
@@ -483,28 +652,7 @@ async def cmd_mafia_start(update, ctx):
     await msg.reply_text(
         "🍁 *Кленовая мафия* — выберите количество игроков (5–20):",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_make_count_kb("ms", 5),
-    )
-
-
-async def cmd_mafia_test(update, ctx):
-    if not _check_thread(update):
-        return
-    msg = update.effective_message
-    user = update.effective_user
-    chat = update.effective_chat
-    if not msg or not user or not chat or chat.type == "private":
-        return
-    if not await _is_chat_admin(ctx.bot, chat.id, user.id):
-        await msg.reply_text("⛔ Только администратор.")
-        return
-    if chat.id in GAMES:
-        await msg.reply_text("⚠️ В этом чате уже идёт игра.")
-        return
-    await msg.reply_text(
-        "🧪 *Тест Кленовой мафии* — выберите количество (2–20):",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_make_count_kb("ts", 2),
+        reply_markup=_make_count_kb(),
     )
 
 
@@ -525,6 +673,7 @@ async def cmd_mafia_stop(update, ctx):
         return
     if game.task and not game.task.done():
         game.task.cancel()
+    _unregister_all_in_chat(chat.id)
     await msg.reply_text("🛑 Игра остановлена.")
 
 
@@ -544,14 +693,12 @@ async def cb_start_count(update, ctx):
         await q.answer("Игра уже идёт", show_alert=True)
         return
     try:
-        prefix, count_str = q.data.split(":")
-        count = int(count_str)
+        count = int(q.data.split(":")[1])
     except (IndexError, ValueError):
         await q.answer("Ошибка", show_alert=True)
         return
-    min_count = 2 if prefix == "ts" else 5
-    if count < min_count or count > 20:
-        await q.answer(f"От {min_count} до 20", show_alert=True)
+    if count < 5 or count > 20:
+        await q.answer("От 5 до 20", show_alert=True)
         return
     thread_id = q.message.message_thread_id or 0
     game = Game(chat_id=chat.id, thread_id=thread_id, total=count)
@@ -563,9 +710,9 @@ async def cb_start_count(update, ctx):
     ])
     try:
         await q.edit_message_text(
-            f"🍁 *{'Тест ' if prefix == 'ts' else ''}Кленовая мафия* — набор\n\n"
+            f"🍁 *Кленовая мафия* — набор\n\n"
             f"Нужно: *{count}*\nНабрано: *0/{count}*\n\n"
-            f"❗ Каждому игроку нужно нажать /start в личке с ботом.",
+            f"❗ Каждому нажать /start в личке с ботом.",
             parse_mode=ParseMode.MARKDOWN, reply_markup=kb,
         )
     except Exception as e:
@@ -583,6 +730,7 @@ async def _join_timeout(bot, chat_id, secs):
     if game is None or game.phase != "joining":
         return
     GAMES.pop(chat_id, None)
+    _unregister_all_in_chat(chat_id)
     try:
         await _send_to_chat(bot, game,
             f"⏳ Набор не завершён за {secs // 60} мин. Игра отменена.")
@@ -615,7 +763,7 @@ async def cb_join(update, ctx):
     try:
         await ctx.bot.send_message(
             user.id,
-            "🍁 Ты в игре «Кленовая мафия». Роль придёт сюда же после набора.\n\n"
+            "🍁 Ты в игре «Кленовая мафия». Роль придёт после набора.\n\n"
             "Когда игра начнётся, здесь появится кнопка «🍁 Меню».",
             disable_notification=True,
         )
@@ -625,6 +773,7 @@ async def cb_join(update, ctx):
     game.players[user.id] = Player(user_id=user.id,
                                    username=user.username or "",
                                    full_name=user.full_name)
+    _register_user_game(user.id, chat.id)
     n = len(game.players)
     if n >= game.total:
         if game.task and not game.task.done():
@@ -667,6 +816,7 @@ async def cb_cancel(update, ctx):
         return
     if game.task and not game.task.done():
         game.task.cancel()
+    _unregister_all_in_chat(chat.id)
     await q.answer("Отменено")
     try:
         await _send_to_chat(ctx.bot, game, "🍁 Игра отменена.")
@@ -680,6 +830,7 @@ async def _start_game(bot, game):
         if roles is None:
             await _send_to_chat(bot, game, "❌ Нет ролей для такого числа игроков.")
             GAMES.pop(game.chat_id, None)
+            _unregister_all_in_chat(game.chat_id)
             return
         roles = roles[:]
         random.shuffle(roles)
@@ -688,7 +839,6 @@ async def _start_game(bot, game):
         for uid, role in zip(uids, roles):
             game.players[uid].role = role
             game.players[uid].games += 1
-
         mafia_names = [p.full_name for p in game.all_mafia()]
         for p in game.players.values():
             teammates = []
@@ -704,7 +854,6 @@ async def _start_game(bot, game):
                 reply_markup=_menu_open_kb(game.chat_id))
             if not ok:
                 game.dm_failed.add(p.user_id)
-
         sent = await _send_to_chat(
             bot, game,
             f"🍁 *Игра началась!*\n\n"
@@ -727,6 +876,7 @@ async def _start_game(bot, game):
     except Exception as e:
         log.exception("start_game error: %s", e)
         GAMES.pop(game.chat_id, None)
+        _unregister_all_in_chat(game.chat_id)
         try:
             await _send_to_chat(bot, game, f"⚠️ Ошибка запуска: {e}")
         except Exception:
@@ -759,18 +909,17 @@ async def _game_loop(bot, game):
             pass
     finally:
         GAMES.pop(game.chat_id, None)
+        _unregister_all_in_chat(game.chat_id)
 
 
 async def _run_night(bot, game):
     game.phase = "night"
     game.night_actions.clear()
     game.dm_failed.clear()
-
     for p in game.players.values():
         for iid in list(p.active_items.keys()):
             if p.active_items[iid] == "now":
                 del p.active_items[iid]
-
     await _send_to_chat(
         bot, game,
         f"🌙 *Ночь {game.round_num}*\n\nКленовый город засыпает…",
@@ -778,9 +927,7 @@ async def _run_night(bot, game):
         reply_markup=_menu_open_kb(game.chat_id),
     )
     await asyncio.sleep(2)
-
     dead_players = [p for p in game.players.values() if not p.alive]
-
     for p in game.alive_players():
         if p.role == "citizen":
             continue
@@ -809,7 +956,6 @@ async def _run_night(bot, game):
         )
         if not ok:
             game.dm_failed.add(p.user_id)
-
     await _wait_all_actions(game, NIGHT_ACTION_TIMEOUT)
     await _resolve_night(bot, game)
 
@@ -836,7 +982,6 @@ async def _resolve_night(bot, game):
     cop_target = None
     medium_target = None
     mafia_votes = []
-
     for uid, tid in game.night_actions.items():
         actor = game.players.get(uid)
         if actor is None or not actor.alive:
@@ -853,9 +998,7 @@ async def _resolve_night(bot, game):
             medium_target = tid
         elif actor.role == "mafia":
             mafia_votes.append(tid)
-
     messages = []
-
     for target_id, src_name in [(bartender_target, "Укрыватель"),
                                 (whore_target, "Очаровательница")]:
         if target_id and target_id in game.players:
@@ -863,7 +1006,6 @@ async def _resolve_night(bot, game):
             if t.alive:
                 t.muted_until = time.time() + MUTE_DURATION_SEC
                 messages.append(f"🔇 {t.full_name} замолчал на 5 мин ({src_name}).")
-
     if cop_target and cop_target in game.players:
         cop_player = next((p for p in game.alive_players() if p.role == "cop"), None)
         t = game.players[cop_target]
@@ -879,7 +1021,6 @@ async def _resolve_night(bot, game):
                 f"{'ТЕНЬ' if is_mafia else 'Житель'}",
                 parse_mode=ParseMode.MARKDOWN,
             )
-
     if medium_target and medium_target in game.players:
         med_player = next((p for p in game.alive_players() if p.role == "medium"), None)
         t = game.players[medium_target]
@@ -889,7 +1030,6 @@ async def _resolve_night(bot, game):
                 f"👻 Призрак *{t.full_name}* был ролью: *{ROLE_NAMES[t.role]}*",
                 parse_mode=ParseMode.MARKDOWN,
             )
-
     if mafia_votes:
         c = Counter(mafia_votes)
         top_count = c.most_common(1)[0][1]
@@ -905,10 +1045,8 @@ async def _resolve_night(bot, game):
         else:
             victim.alive = False
             messages.append(f"💀 Убит: *{victim.full_name}*")
-
     if not messages:
         messages.append("🌅 Ночь прошла спокойно.")
-
     await _send_to_chat(
         bot, game,
         "🌅 *Ночь закончилась*\n\n" + "\n".join(messages),
@@ -944,7 +1082,6 @@ async def _run_vote(bot, game):
         reply_markup=InlineKeyboardMarkup(rows),
     )
     await asyncio.sleep(VOTE_DURATION_SEC)
-
     valid_votes = {}
     for voter_id, target_id in game.votes.items():
         target = game.players.get(target_id)
@@ -953,13 +1090,11 @@ async def _run_vote(bot, game):
                 target.consume_active("blind")
             continue
         valid_votes[voter_id] = target_id
-
     if not valid_votes:
         await _send_to_chat(bot, game,
             "⚖️ *Голосование окончено*\n\nВсе голоса сгорели.",
             parse_mode=ParseMode.MARKDOWN)
         return
-
     c = Counter(valid_votes.values())
     top = c.most_common()
     if len(top) == 1 or top[0][1] > top[1][1]:
@@ -1041,7 +1176,7 @@ async def cb_night_action(update, ctx):
         await q.answer("Ты мёртв", show_alert=True)
         return
     if user.id in game.night_actions:
-        await q.answer("Ты уже сделал ход этой ночью", show_alert=True)
+        await q.answer("Ты уже сделал ход", show_alert=True)
         return
     try:
         target_id = int(q.data.split(":")[1])
@@ -1086,7 +1221,7 @@ async def cb_vote(update, ctx):
         await q.answer("Ты мёртв", show_alert=True)
         return
     if p.is_muted():
-        await q.answer("Ты не можешь голосовать (замолчал)", show_alert=True)
+        await q.answer("Не можешь голосовать (замолчал)", show_alert=True)
         return
     if user.id in game.votes:
         await q.answer("Ты уже голосовал", show_alert=True)
@@ -1139,6 +1274,34 @@ async def cb_open_menu(update, ctx):
         await q.answer("Меню открыто в ЛС")
     except Exception:
         await q.answer("Нажми /start в личке с ботом!", show_alert=True)
+
+
+async def cb_dm_pick(update, ctx):
+    q = update.callback_query
+    if not q:
+        return
+    try:
+        chat_id = int(q.data.split(":")[1])
+    except (IndexError, ValueError):
+        await q.answer("Ошибка", show_alert=True)
+        return
+    game = GAMES.get(chat_id)
+    if not game:
+        await q.answer("Игра завершена", show_alert=True)
+        return
+    p = game.players.get(q.from_user.id)
+    if not p:
+        await q.answer("Ты не в игре", show_alert=True)
+        return
+    try:
+        await ctx.bot.send_message(
+            q.from_user.id, _menu_text(p),
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_menu_main_kb(chat_id),
+        )
+        await q.answer("Меню открыто")
+    except Exception:
+        await q.answer("Не смог открыть меню", show_alert=True)
 
 
 async def cb_menu_main(update, ctx):
@@ -1620,6 +1783,7 @@ async def on_member_left(update, ctx):
     if p is None or not p.alive:
         return
     p.alive = False
+    _unregister_user_game(u.id, cm.chat.id)
     try:
         await _send_to_chat(ctx.bot, game,
             f"🚪 *{p.full_name}* покинул чат и выбывает.",
@@ -1630,41 +1794,47 @@ async def on_member_left(update, ctx):
         await _announce_end(ctx.bot, game)
 
 
-MAFIA_START_REGEX = re.compile(r"(?i)^мафия\s+(?:начать|старт)$")
-MAFIA_STOP_REGEX = re.compile(r"(?i)^мафия\s+(?:стоп|stop)$")
-MAFIA_TEST_REGEX = re.compile(r"(?i)^мафия\s+(?:тест|test)$")
-
-
-def main():
+def _build_app():
     app = Application.builder().token(BOT_TOKEN).build()
     g = filters.ChatType.GROUPS
 
-    app.add_handler(TypeHandler(Update, activation_gate), group=-200)
+    app.add_handler(MessageHandler(g, activation_mw), group=-300)
     app.add_handler(MessageHandler(g, guard_muted_messages), group=-100)
 
     app.add_handler(ChatMemberHandler(
         on_bot_added, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(ChatMemberHandler(
+        on_member_left, chat_member_types=ChatMemberHandler.CHAT_MEMBER))
 
     app.add_handler(MessageHandler(
-        g & filters.TEXT & filters.Regex(ACTIVATION_BYPASS), cmd_activate))
+        g & filters.TEXT & filters.Regex(ACTIVATION_REGEX), cmd_activate))
     app.add_handler(CommandHandler("activate", cmd_activate, filters=g))
 
-    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(MAFIA_START_REGEX), cmd_mafia_start))
-    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(MAFIA_STOP_REGEX), cmd_mafia_stop))
-    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(MAFIA_TEST_REGEX), cmd_mafia_test))
+    app.add_handler(MessageHandler(
+        g & filters.TEXT & filters.Regex(MAFIA_START_REGEX), cmd_mafia_start))
+    app.add_handler(MessageHandler(
+        g & filters.TEXT & filters.Regex(MAFIA_STOP_REGEX), cmd_mafia_stop))
     app.add_handler(CommandHandler("mafia", cmd_mafia_start, filters=g))
     app.add_handler(CommandHandler("mafia_stop", cmd_mafia_stop, filters=g))
-    app.add_handler(CommandHandler("test", cmd_mafia_test, filters=g))
     app.add_handler(CommandHandler("threadid", cmd_threadid, filters=g))
     app.add_handler(CommandHandler("menu", cmd_menu, filters=g))
 
-    app.add_handler(CallbackQueryHandler(cb_start_count, pattern=r"^(ms|ts):"))
+    app.add_handler(CommandHandler("start", cmd_dm_start,
+                                   filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("menu", cmd_dm_menu,
+                                   filters=filters.ChatType.PRIVATE))
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
+        cmd_dm_other,
+    ))
+
+    app.add_handler(CallbackQueryHandler(cb_start_count, pattern=r"^ms:"))
     app.add_handler(CallbackQueryHandler(cb_join, pattern=r"^mj$"))
     app.add_handler(CallbackQueryHandler(cb_cancel, pattern=r"^mc$"))
     app.add_handler(CallbackQueryHandler(cb_night_action, pattern=r"^mn:"))
     app.add_handler(CallbackQueryHandler(cb_vote, pattern=r"^mv:"))
-
     app.add_handler(CallbackQueryHandler(cb_open_menu, pattern=r"^openmenu:"))
+    app.add_handler(CallbackQueryHandler(cb_dm_pick, pattern=r"^dmpick:"))
     app.add_handler(CallbackQueryHandler(cb_menu_main, pattern=r"^menu:main:"))
     app.add_handler(CallbackQueryHandler(cb_menu_profile, pattern=r"^menu:profile:"))
     app.add_handler(CallbackQueryHandler(cb_menu_shop, pattern=r"^menu:shop:"))
@@ -1678,11 +1848,83 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_inv_do, pattern=r"^inv:do:"))
     app.add_handler(CallbackQueryHandler(cb_noop, pattern=r"^noop$"))
 
-    app.add_handler(ChatMemberHandler(
-        on_member_left, chat_member_types=ChatMemberHandler.CHAT_MEMBER))
+    return app
 
-    log.info("Mafia bot starting…")
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+async def _shutdown_app(app):
+    log.info("shutting down app…")
+    if app.updater is not None:
+        try:
+            await app.updater.stop()
+            await asyncio.sleep(2)
+        except Exception as e:
+            log.debug("updater.stop: %s", e)
+    for step in (app.stop, app.shutdown):
+        try:
+            await step()
+        except Exception as e:
+            log.debug("shutdown step: %s", e)
+    log.info("app shut down.")
+
+
+async def _run_bot():
+    cycle = 0
+    while True:
+        cycle += 1
+        log.info("=== app cycle #%d ===", cycle)
+        app = None
+        try:
+            app = _build_app()
+            log.info("Подключение к Telegram…")
+            await app.initialize()
+            await app.start()
+            await app.updater.start_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                poll_interval=1.0,
+                timeout=30,
+            )
+            log.info("Bot running.")
+            await asyncio.Event().wait()
+        except (KeyboardInterrupt, SystemExit):
+            log.info("Bot stopped by user.")
+            if app is not None:
+                await _shutdown_app(app)
+            break
+        except Conflict as e:
+            log.warning("Conflict: %s. Жду 45с", e)
+            if app is not None:
+                await _shutdown_app(app)
+            await asyncio.sleep(45)
+        except (TimedOut, NetworkError) as e:
+            log.warning("Сеть: %s. Жду 10с", type(e).__name__)
+            if app is not None:
+                await _shutdown_app(app)
+            await asyncio.sleep(10)
+        except Exception as e:
+            log.exception("Ошибка цикла #%d: %s", cycle, e)
+            if app is not None:
+                await _shutdown_app(app)
+            await asyncio.sleep(15)
+
+
+def main():
+    log.info("Bot starting…")
+    while True:
+        try:
+            asyncio.run(_run_bot())
+            break
+        except KeyboardInterrupt:
+            log.info("Bot stopped by user.")
+            break
+        except SystemExit:
+            break
+        except Exception as e:
+            log.exception("Фатальный краш. Рестарт через 15 сек: %s", e)
+            try:
+                time.sleep(15)
+            except KeyboardInterrupt:
+                break
 
 
 if __name__ == "__main__":
