@@ -462,23 +462,35 @@ async def guard_muted_messages(update, ctx):
         return
     if not _check_thread(update):
         return
+    
     game = GAMES.get(msg.chat.id)
     if game is None:
         return
     if (msg.message_thread_id or 0) != game.thread_id:
         return
-    p = game.players.get(user.id)
-    if p is None or not p.alive:
-        return
-    if not p.is_muted():
-        return
+        
     if await _is_chat_admin(ctx.bot, msg.chat.id, user.id):
         return
-    try:
-        await msg.delete()
-    except Exception:
-        pass
-    raise ApplicationHandlerStop
+        
+    p = game.players.get(user.id)
+    if p is None:
+        return
+        
+    should_delete = False
+    
+    if game.phase == "night":
+        should_delete = True
+    elif not p.alive:
+        should_delete = True
+    elif p.is_muted():
+        should_delete = True
+        
+    if should_delete:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        raise ApplicationHandlerStop
 
 
 def _menu_main_kb(chat_id):
