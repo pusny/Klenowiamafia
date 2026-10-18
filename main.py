@@ -73,13 +73,22 @@ def _init_db():
                 inventory TEXT DEFAULT '{}',
                 achievements TEXT DEFAULT '[]',
                 unlocked_titles TEXT DEFAULT '["Новичок"]',
-                last_bonus REAL DEFAULT 0
+                last_bonus REAL DEFAULT 0,
+                croc_wins INTEGER DEFAULT 0,
+                mafia_wins INTEGER DEFAULT 0,
+                city_wins INTEGER DEFAULT 0
             );
         """)
         
         cols = {row[1] for row in conn.execute("PRAGMA table_info(users_data)")}
         if "unlocked_titles" not in cols:
             conn.execute("ALTER TABLE users_data ADD COLUMN unlocked_titles TEXT DEFAULT '[\"Новичок\"]'")
+        if "croc_wins" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN croc_wins INTEGER DEFAULT 0")
+        if "mafia_wins" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN mafia_wins INTEGER DEFAULT 0")
+        if "city_wins" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN city_wins INTEGER DEFAULT 0")
             
         conn.commit()
 
@@ -117,6 +126,15 @@ def db_get_user(user_id, tg_user=None):
         d['achievements'] = json.loads(d['achievements'] or '[]')
         d['unlocked_titles'] = json.loads(d.get('unlocked_titles') or '["Новичок"]')
         
+        d['coins'] = int(d.get('coins') or 0)
+        d['level'] = int(d.get('level') or 1)
+        d['wins'] = int(d.get('wins') or 0)
+        d['games'] = int(d.get('games') or 0)
+        d['last_bonus'] = float(d.get('last_bonus') or 0.0)
+        d['croc_wins'] = int(d.get('croc_wins') or 0)
+        d['mafia_wins'] = int(d.get('mafia_wins') or 0)
+        d['city_wins'] = int(d.get('city_wins') or 0)
+        
         if d['title'] not in d['unlocked_titles']:
             d['unlocked_titles'].append(d['title'])
         return d
@@ -129,11 +147,12 @@ def db_save_user(uid, **kwargs):
     with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
         conn.execute("""
             UPDATE users_data SET 
-                username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?
+                username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?, croc_wins=?, mafia_wins=?, city_wins=?
             WHERE user_id=?
         """, (
             u['username'], u['coins'], u['level'], u['title'], u['wins'], u['games'],
-            json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'], uid
+            json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'],
+            u['croc_wins'], u['mafia_wins'], u['city_wins'], uid
         ))
         conn.commit()
 
@@ -215,22 +234,31 @@ TITLES_SHOP = {
     "leaf_collector": {"name": "Собиратель листвы", "emoji": "🍁", "price": 50, "ach_req": 0, "daily_bonus": 7},
     "guardian": {"name": "Страж Клена", "emoji": "🌳", "price": 150, "ach_req": 0, "daily_bonus": 10},
     "king": {"name": "Осенний Король", "emoji": "👑", "price": 500, "ach_req": 0, "daily_bonus": 20},
-    "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 3, "daily_bonus": 8},
-    "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 6, "daily_bonus": 12},
-    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 9, "daily_bonus": 25},
+    "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 5, "daily_bonus": 8},
+    "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 10, "daily_bonus": 12},
+    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 15, "daily_bonus": 25},
 }
 
 ALL_ACHIEVEMENTS = {
     "first_win": "🍁 Первая победа",
-    "rich": "💰 Богач (100 листиков)",
+    "rich_100": "💰 Богач (100🍁)",
+    "rich_1000": "💎 Олигарх (1000🍁)",
     "games_10": "🎮 10 сыгранных игр",
     "games_50": "🎮 50 сыгранных игр",
+    "games_100": "🎮 100 сыгранных игр",
     "wins_5": "🏆 5 побед",
     "wins_20": "🏆 20 побед",
-    "croc_master": "🐊 Крокодилий мастер",
-    "mafia_boss": "🔪 Победа за Тень",
+    "wins_50": "🏆 50 побед",
+    "croc_1": "🐊 Первый крокодил",
+    "croc_10": "🐊 Знаток слов (10)",
+    "croc_50": "🐊 Крокодилий бог (50)",
+    "mafia_1": "🔪 Первая тень",
+    "mafia_10": "🔪 Босс мафии (10)",
+    "city_1": "🕵️ Первый мирный",
+    "city_10": "🕵️ Защитник города (10)",
     "level_5": "⭐ Достигнут 5 уровень",
-    "level_10": "🌟 Достигнут 10 уровень"
+    "level_10": "🌟 Достигнут 10 уровень",
+    "level_20": "✨ Достигнут 20 уровень"
 }
 
 JOIN_TIMEOUT_SEC = 300
@@ -433,13 +461,15 @@ async def cmd_dm_other(update, ctx):
             except: await msg.reply_text("❌ Ошибка.")
         elif action == "give_title" and len(parts) >= 2:
             try:
-                target, title = int(parts[0].replace("@", "")), " ".join(parts[1:])
+                target = int(parts[0].replace("@", ""))
+                title = " ".join(parts[1:])
                 u = db_get_user(target)
                 if title not in u['unlocked_titles']:
                     u['unlocked_titles'].append(title)
                 db_save_user(target, title=title, unlocked_titles=u['unlocked_titles'])
                 await msg.reply_text(f"✅ Выдан титул '{title}' юзеру {target}")
-            except: await msg.reply_text("❌ Ошибка.")
+            except Exception as e: 
+                await msg.reply_text(f"❌ Ошибка: {e}")
         return
 
     if uid in CROC_AWAITING:
@@ -558,6 +588,26 @@ async def cb_join(update, ctx):
         await ctx.bot.edit_message_text(chat_id=chat.id, message_id=game.join_message_id, text=f"🍁 *Набор*\nНужно: *{game.total}*\nНабрано: *{n}/{game.total}*\n\n👥 {names}", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
     except: pass
     await q.answer(f"В игре ({n}/{game.total})")
+
+async def cb_cancel(update, ctx):
+    q = update.callback_query
+    if q is None: return
+    chat = update.effective_chat
+    user = q.from_user
+    if not await _is_chat_admin(ctx.bot, chat.id, user.id):
+        await q.answer("Только администратор", show_alert=True)
+        return
+    game = GAMES.pop(chat.id, None)
+    if game is None:
+        await q.answer()
+        return
+    if game.task and not game.task.done(): game.task.cancel()
+    
+    await q.answer("Отменено")
+    try:
+        await q.edit_message_text("🍁 Игра отменена.")
+    except:
+        await _send_to_chat(ctx.bot, game, "🍁 Игра отменена.")
 
 async def _start_game(bot, game):
     roles = get_roles(game.total)[:]
@@ -733,18 +783,32 @@ async def _announce_end(bot, game):
             u['wins'] += 1
             reward = 10 if game.winner == "city" else 15
             if "first_win" not in u['achievements']: u['achievements'].append("first_win")
-            if game.winner == "mafia" and "mafia_boss" not in u['achievements']: u['achievements'].append("mafia_boss")
+            
+            if game.winner == "mafia":
+                u['mafia_wins'] += 1
+                if "mafia_1" not in u['achievements']: u['achievements'].append("mafia_1")
+                if u['mafia_wins'] >= 10 and "mafia_10" not in u['achievements']: u['achievements'].append("mafia_10")
+            else:
+                u['city_wins'] += 1
+                if "city_1" not in u['achievements']: u['achievements'].append("city_1")
+                if u['city_wins'] >= 10 and "city_10" not in u['achievements']: u['achievements'].append("city_10")
             
         u['coins'] += reward
-        if u['coins'] >= 100 and "rich" not in u['achievements']: u['achievements'].append("rich")
+        if u['coins'] >= 100 and "rich_100" not in u['achievements']: u['achievements'].append("rich_100")
+        if u['coins'] >= 1000 and "rich_1000" not in u['achievements']: u['achievements'].append("rich_1000")
+        
         if u['games'] >= 10 and "games_10" not in u['achievements']: u['achievements'].append("games_10")
         if u['games'] >= 50 and "games_50" not in u['achievements']: u['achievements'].append("games_50")
+        if u['games'] >= 100 and "games_100" not in u['achievements']: u['achievements'].append("games_100")
+        
         if u['wins'] >= 5 and "wins_5" not in u['achievements']: u['achievements'].append("wins_5")
         if u['wins'] >= 20 and "wins_20" not in u['achievements']: u['achievements'].append("wins_20")
+        if u['wins'] >= 50 and "wins_50" not in u['achievements']: u['achievements'].append("wins_50")
         
         u['level'] = (u['wins'] * 2 + u['games']) // 5 + 1
         if u['level'] >= 5 and "level_5" not in u['achievements']: u['achievements'].append("level_5")
         if u['level'] >= 10 and "level_10" not in u['achievements']: u['achievements'].append("level_10")
+        if u['level'] >= 20 and "level_20" not in u['achievements']: u['achievements'].append("level_20")
         
         db_save_user(p.user_id, **u)
         
@@ -1094,7 +1158,12 @@ async def croc_guess_mw(update, ctx):
         
         u = db_get_user(msg.from_user.id, msg.from_user)
         u['coins'] += 10
-        if "croc_master" not in u['achievements']: u['achievements'].append("croc_master")
+        u['croc_wins'] += 1
+        
+        if "croc_1" not in u['achievements']: u['achievements'].append("croc_1")
+        if u['croc_wins'] >= 10 and "croc_10" not in u['achievements']: u['achievements'].append("croc_10")
+        if u['croc_wins'] >= 50 and "croc_50" not in u['achievements']: u['achievements'].append("croc_50")
+        
         db_save_user(msg.from_user.id, **u)
         
         try:
@@ -1141,6 +1210,7 @@ def _build_app():
 
     app.add_handler(CallbackQueryHandler(cb_start_count, pattern=r"^ms:"))
     app.add_handler(CallbackQueryHandler(cb_join, pattern=r"^mj$"))
+    app.add_handler(CallbackQueryHandler(cb_cancel, pattern=r"^mc$")) # <--- ВОТ ОНА, ВЕРНУЛ
     app.add_handler(CallbackQueryHandler(cb_night_action, pattern=r"^mn:"))
     app.add_handler(CallbackQueryHandler(cb_vote, pattern=r"^mv:"))
     
