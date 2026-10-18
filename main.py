@@ -39,6 +39,8 @@ try:
 except ValueError:
     ADMIN_ID = 0
 
+SELLER_USERNAME = (os.getenv("SELLER_USERNAME") or "@admin").strip()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
@@ -234,9 +236,13 @@ TITLES_SHOP = {
     "leaf_collector": {"name": "Собиратель листвы", "emoji": "🍁", "price": 50, "ach_req": 0, "daily_bonus": 7},
     "guardian": {"name": "Страж Клена", "emoji": "🌳", "price": 150, "ach_req": 0, "daily_bonus": 10},
     "king": {"name": "Осенний Король", "emoji": "👑", "price": 500, "ach_req": 0, "daily_bonus": 20},
-    "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 5, "daily_bonus": 8},
-    "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 10, "daily_bonus": 12},
-    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 15, "daily_bonus": 25},
+    "donater": {"name": "Меценат", "emoji": "💎", "price": 1000, "ach_req": 0, "daily_bonus": 30},
+    "rich_boy": {"name": "Золотой Скрудж", "emoji": "💰", "price": 2500, "ach_req": 0, "daily_bonus": 50},
+    
+    "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 5, "daily_bonus": 15},
+    "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 10, "daily_bonus": 25},
+    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 15, "daily_bonus": 40},
+    "god": {"name": "Божество Клена", "emoji": "🌌", "price": 0, "ach_req": 20, "daily_bonus": 60},
 }
 
 ALL_ACHIEVEMENTS = {
@@ -415,7 +421,7 @@ def _menu_main_kb(user_id, chat_id=0):
         [InlineKeyboardButton("👤 Профиль", callback_data=f"menu:profile:{chat_id}"), InlineKeyboardButton("🛒 Магазин", callback_data=f"menu:shop:{chat_id}")],
         [InlineKeyboardButton("🎒 Инвентарь", callback_data=f"menu:inv:{chat_id}"), InlineKeyboardButton("🏆 Топ", callback_data=f"menu:top:{chat_id}")],
         [InlineKeyboardButton("🏅 Достижения", callback_data=f"menu:ach:{chat_id}"), InlineKeyboardButton("🍁 Бонус", callback_data=f"menu:bonus:{chat_id}")],
-        [InlineKeyboardButton("👑 Титулы", callback_data=f"menu:titles:{chat_id}")]
+        [InlineKeyboardButton("👑 Титулы", callback_data=f"menu:titles:{chat_id}"), InlineKeyboardButton("💎 Купить 🍁", callback_data=f"menu:buy:{chat_id}")]
     ]
     if user_id == ADMIN_ID:
         rows.append([InlineKeyboardButton("🛠 Админ-панель", callback_data="admin:main")])
@@ -1097,6 +1103,22 @@ async def cb_menu_top(update, ctx):
     await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
     await q.answer()
 
+async def cb_menu_buy(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except: chat_id = 0
+    
+    text = (
+        f"💎 *Покупка листиков*\n\n"
+        f"Актуальный курс: *1 листик = 3 рубля*\n\n"
+        f"Для покупки напишите нашему менеджеру: {SELLER_USERNAME}\n"
+        f"После перевода он выдаст вам листики.\n\n"
+        f"_(Обязательно укажите ваш ID: `{q.from_user.id}`)_"
+    )
+    await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
+    await q.answer()
+
 async def cb_admin_main(update, ctx):
     q = update.callback_query
     if q.from_user.id != ADMIN_ID: return await q.answer("Нет доступа", show_alert=True)
@@ -1210,7 +1232,7 @@ def _build_app():
 
     app.add_handler(CallbackQueryHandler(cb_start_count, pattern=r"^ms:"))
     app.add_handler(CallbackQueryHandler(cb_join, pattern=r"^mj$"))
-    app.add_handler(CallbackQueryHandler(cb_cancel, pattern=r"^mc$")) # <--- ВОТ ОНА, ВЕРНУЛ
+    app.add_handler(CallbackQueryHandler(cb_cancel, pattern=r"^mc$"))
     app.add_handler(CallbackQueryHandler(cb_night_action, pattern=r"^mn:"))
     app.add_handler(CallbackQueryHandler(cb_vote, pattern=r"^mv:"))
     
@@ -1224,6 +1246,7 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_menu_inv, pattern=r"^menu:inv:"))
     app.add_handler(CallbackQueryHandler(cb_menu_top, pattern=r"^menu:top:"))
     app.add_handler(CallbackQueryHandler(cb_menu_bonus, pattern=r"^menu:bonus:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_buy, pattern=r"^menu:buy:"))
     
     app.add_handler(CallbackQueryHandler(cb_shop_item, pattern=r"^shop:item:"))
     app.add_handler(CallbackQueryHandler(cb_shop_buy, pattern=r"^shop:buy:"))
