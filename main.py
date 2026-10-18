@@ -514,37 +514,6 @@ def _make_count_kb():
     return InlineKeyboardMarkup(rows)
 
 
-async def cmd_menu(update, ctx):
-    msg = update.effective_message
-    user = update.effective_user
-    chat = update.effective_chat
-    if not msg or not user or not chat or chat.type == "private":
-        return
-    if not _check_thread(update):
-        return
-    game = GAMES.get(chat.id)
-    if not game:
-        await msg.reply_text("🍁 Меню доступно только во время игры.")
-        return
-    p = game.players.get(user.id)
-    if not p:
-        await msg.reply_text("🍁 Ты не в игре.")
-        return
-    _register_user_game(user.id, chat.id)
-    try:
-        await ctx.bot.send_message(
-            user.id, _menu_text(p),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=_menu_main_kb(chat.id),
-        )
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-    except Exception:
-        await msg.reply_text("⚠️ Сначала нажми /start в личке с ботом!")
-
-
 async def cmd_dm_start(update, ctx):
     msg = update.effective_message
     user = update.effective_user
@@ -863,10 +832,8 @@ async def _start_game(bot, game):
             bot, game,
             f"🍁 *Игра началась!*\n\n"
             f"Игроков: *{game.total}*\nТеней: *{len(game.all_mafia())}*\n\n"
-            f"Роли отправлены в личку.\n"
-            f"Команда /menu — магазин, профиль, инвентарь.",
+            f"Роли и меню отправлены в личку.",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=_menu_open_kb(game.chat_id),
         )
         if sent:
             game.start_message_id = sent.message_id
@@ -929,7 +896,6 @@ async def _run_night(bot, game):
         bot, game,
         f"🌙 *Ночь {game.round_num}*\n\nКленовый город засыпает…",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_menu_open_kb(game.chat_id),
     )
     await asyncio.sleep(2)
     dead_players = [p for p in game.players.values() if not p.alive]
@@ -950,7 +916,7 @@ async def _run_night(bot, game):
         if not targets:
             game.dm_failed.add(p.user_id)
             continue
-        rows = [[InlineKeyboardButton(t.full_name, callback_data=f"mn:{t.user_id}")]
+        rows = [[InlineKeyboardButton(t.full_name, callback_data=f"mn:{game.chat_id}:{t.user_id}")]
                 for t in targets]
         ok = await _safe_send(
             bot, p.user_id,
@@ -1056,7 +1022,6 @@ async def _resolve_night(bot, game):
         bot, game,
         "🌅 *Ночь закончилась*\n\n" + "\n".join(messages),
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_menu_open_kb(game.chat_id),
     )
 
 
@@ -1066,7 +1031,6 @@ async def _run_day(bot, game):
         bot, game,
         f"☀️ *День {game.round_num}*\n\nОбсуждение — 3 минуты.",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_menu_open_kb(game.chat_id),
     )
     await asyncio.sleep(DAY_DISCUSSION_SEC)
 
@@ -1078,7 +1042,7 @@ async def _run_vote(bot, game):
     if len(alive) <= 1:
         await _send_to_chat(bot, game, "⚖️ Остался один игрок — голосовать не с кем.")
         return
-    rows = [[InlineKeyboardButton(p.full_name, callback_data=f"mv:{p.user_id}")]
+    rows = [[InlineKeyboardButton(p.full_name, callback_data=f"mv:{game.chat_id}:{p.user_id}")]
             for p in alive]
     await _send_to_chat(
         bot, game,
@@ -1100,9 +1064,13 @@ async def _run_vote(bot, game):
             "⚖️ *Голосование окончено*\n\nВсе голоса сгорели.",
             parse_mode=ParseMode.MARKDOWN)
         return
+    
     c = Counter(valid_votes.values())
     top = c.most_common()
-    if len(top) == 1 or top[0][1] > top[1][1]:
+    total_alive = len(game.alive_players())
+    majority = total_alive // 2 + 1
+    
+    if top and top[0][1] >= majority:
         eliminated_id = top[0][0]
         p = game.players[eliminated_id]
         p.alive = False
@@ -1114,7 +1082,8 @@ async def _run_vote(bot, game):
         )
     else:
         await _send_to_chat(bot, game,
-            "⚖️ *Голосование окончено*\n\nНичья.",
+            "⚖️ *Голосование окончено*\n\n"
+            "Никто не набрал большинства голосов. Ничья.",
             parse_mode=ParseMode.MARKDOWN)
 
 
@@ -1167,9 +1136,16 @@ async def cb_night_action(update, ctx):
     q = update.callback_query
     if q is None:
         return
-    chat = update.effective_chat
+    try:
+        parts = q.data.split(":")
+        chat_id = int(parts[1])
+        target_id = int(parts[2])
+    except (IndexError, ValueError):
+        await q.answer("Ошибка", show_alert=True)
+        return
+    
     user = q.from_user
-    game = GAMES.get(chat.id)
+    game = GAMES.get(chat_id)
     if game is None or game.phase != "night":
         await q.answer("Сейчас не ночь", show_alert=True)
         return
@@ -1183,11 +1159,7 @@ async def cb_night_action(update, ctx):
     if user.id in game.night_actions:
         await q.answer("Ты уже сделал ход", show_alert=True)
         return
-    try:
-        target_id = int(q.data.split(":")[1])
-    except (IndexError, ValueError):
-        await q.answer("Ошибка", show_alert=True)
-        return
+
     target = game.players.get(target_id)
     if target is None:
         await q.answer("Не найдено", show_alert=True)
@@ -1212,9 +1184,16 @@ async def cb_vote(update, ctx):
     q = update.callback_query
     if q is None:
         return
-    chat = update.effective_chat
+    try:
+        parts = q.data.split(":")
+        chat_id = int(parts[1])
+        target_id = int(parts[2])
+    except (IndexError, ValueError):
+        await q.answer("Ошибка", show_alert=True)
+        return
+
     user = q.from_user
-    game = GAMES.get(chat.id)
+    game = GAMES.get(chat_id)
     if game is None or game.phase != "voting":
         await q.answer("Сейчас не голосование", show_alert=True)
         return
@@ -1230,11 +1209,6 @@ async def cb_vote(update, ctx):
         return
     if user.id in game.votes:
         await q.answer("Ты уже голосовал", show_alert=True)
-        return
-    try:
-        target_id = int(q.data.split(":")[1])
-    except (IndexError, ValueError):
-        await q.answer("Ошибка", show_alert=True)
         return
     if target_id == user.id:
         await q.answer("Нельзя голосовать за себя", show_alert=True)
@@ -1821,7 +1795,6 @@ def _build_app():
         g & filters.TEXT & filters.Regex(MAFIA_STOP_REGEX), cmd_mafia_stop))
     app.add_handler(CommandHandler("mafia", cmd_mafia_start, filters=g))
     app.add_handler(CommandHandler("mafia_stop", cmd_mafia_stop, filters=g))
-    app.add_handler(CommandHandler("menu", cmd_menu, filters=g))
 
     app.add_handler(CommandHandler("start", cmd_dm_start,
                                    filters=filters.ChatType.PRIVATE))
