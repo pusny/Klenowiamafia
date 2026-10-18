@@ -215,7 +215,6 @@ ALL_ACHIEVEMENTS = {
 
 JOIN_TIMEOUT_SEC = 300
 NIGHT_ACTION_TIMEOUT = 60
-DAY_DISCUSSION_SEC = 180
 VOTE_DURATION_SEC = 60
 MUTE_DURATION_SEC = 5 * 60
 
@@ -636,9 +635,27 @@ async def _resolve_night(bot, game):
 
 async def _run_day(bot, game):
     game.phase = "day"
-    alive = ", ".join([p.full_name for p in game.alive_players()])
-    await _send_to_chat(bot, game, f"☀️ *День {game.round_num}*\nЖивы: {alive}\nОбсуждение 3 минуты.", parse_mode=ParseMode.MARKDOWN)
-    await asyncio.sleep(DAY_DISCUSSION_SEC)
+    alive_list = [p.full_name for p in game.alive_players()]
+    alive_str = ", ".join(alive_list)
+    
+    total = game.total
+    if total <= 6:
+        discuss_sec = 60
+    elif total <= 9:
+        discuss_sec = 90
+    elif total <= 13:
+        discuss_sec = 120
+    elif total <= 17:
+        discuss_sec = 150
+    else:
+        discuss_sec = 180
+        
+    m = discuss_sec // 60
+    s = discuss_sec % 60
+    time_str = f"{m} мин" if s == 0 else f"{m} мин {s} сек"
+    
+    await _send_to_chat(bot, game, f"☀️ *День {game.round_num}*\nЖивы: {alive_str}\nОбсуждение — {time_str}.", parse_mode=ParseMode.MARKDOWN)
+    await asyncio.sleep(discuss_sec)
 
 async def _run_vote(bot, game):
     game.phase = "voting"
