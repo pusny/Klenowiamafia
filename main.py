@@ -247,6 +247,7 @@ CROCODILE_STOP_REGEX = re.compile(r"(?i)^/?(?:крокодил|слова|crocod
 
 CROC_GAME = {}
 CROC_AWAITING = {}
+CROC_ACTIVE = set()
 ADMIN_STATE = {}
 
 def get_roles(count):
@@ -485,6 +486,7 @@ async def cmd_crocodile(update, ctx):
     if not await _is_chat_admin(ctx.bot, msg.chat.id, msg.from_user.id):
         return await msg.reply_text("⛔ Только администратор чата может запустить Крокодила.")
         
+    CROC_ACTIVE.add(msg.chat.id)
     await msg.reply_text("🐊 *Крокодил*\nНажми кнопку, чтобы загадать слово.", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]]))
 
 async def cmd_crocodile_stop(update, ctx):
@@ -495,9 +497,10 @@ async def cmd_crocodile_stop(update, ctx):
     if not await _is_chat_admin(ctx.bot, msg.chat.id, msg.from_user.id):
         return await msg.reply_text("⛔ Только администратор чата может остановить игру.")
         
-    if msg.chat.id in CROC_GAME:
+    if msg.chat.id in CROC_GAME or msg.chat.id in CROC_ACTIVE:
+        CROC_ACTIVE.discard(msg.chat.id)
         CROC_GAME.pop(msg.chat.id, None)
-        await msg.reply_text("🛑 Игра в Крокодила остановлена.")
+        await msg.reply_text("🛑 Игра в Крокодила остановлена. Все старые кнопки теперь неактивны.")
     else:
         await msg.reply_text("ℹ️ В этом чате нет активной игры в Крокодила.")
         
@@ -1068,7 +1071,11 @@ async def cb_admin_users(update, ctx):
 
 async def cb_croc_new(update, ctx):
     q = update.callback_query
-    if q.message.chat.id in CROC_GAME: return await q.answer("Слово уже загадано!", show_alert=True)
+    if q.message.chat.id not in CROC_ACTIVE:
+        return await q.answer("Игра в Крокодила остановлена.", show_alert=True)
+    if q.message.chat.id in CROC_GAME: 
+        return await q.answer("Слово уже загадано!", show_alert=True)
+        
     CROC_AWAITING[q.from_user.id] = q.message.chat.id
     await q.answer("Напиши мне в ЛС слово и описание!", show_alert=True)
     try: await ctx.bot.send_message(q.from_user.id, "🐊 Отправь: `Слово | Описание`", parse_mode=ParseMode.MARKDOWN)
