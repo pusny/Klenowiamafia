@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import logging
 import os
@@ -84,6 +85,15 @@ def _init_db():
 
 _init_db()
 
+def get_safe_name(user_or_player):
+    if hasattr(user_or_player, 'full_name'):
+        name = user_or_player.full_name
+    else:
+        name = user_or_player
+    if not name or not str(name).strip():
+        return "Игрок"
+    return html.escape(str(name))
+
 def db_get_user(user_id, tg_user=None):
     with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
         conn.row_factory = sqlite3.Row
@@ -95,6 +105,8 @@ def db_get_user(user_id, tg_user=None):
             
         if tg_user:
             name = tg_user.username or tg_user.full_name
+            if not name or not name.strip():
+                name = f"Игрок {user_id}"
             if row['username'] != name:
                 conn.execute("UPDATE users_data SET username=? WHERE user_id=?", (name, user_id))
                 conn.commit()
@@ -435,7 +447,7 @@ async def cmd_dm_other(update, ctx):
             word, desc = msg.text.split("|", 1)
             CROC_GAME[chat_id] = {"word": word.strip(), "desc": desc.strip(), "author": uid}
             try:
-                await ctx.bot.send_message(chat_id, f"🐊 *Крокодил!*\n\nОписание: {desc.strip()}\n\nКто угадает слово, пишите в чат!", message_thread_id=THREAD_ID or 0, parse_mode=ParseMode.MARKDOWN)
+                await ctx.bot.send_message(chat_id, f"🐊 <b>Крокодил!</b>\n\nОписание: {html.escape(desc.strip())}\n\nКто угадает слово, пишите в чат!", message_thread_id=THREAD_ID or 0, parse_mode=ParseMode.HTML)
                 await msg.reply_text("✅ Слово загадано!")
             except: pass
         else:
@@ -537,7 +549,7 @@ async def cb_join(update, ctx):
         await ctx.bot.edit_message_text(chat_id=chat.id, message_id=game.join_message_id, text=f"🍁 *Набор окончен*\nИгроков: *{n}/{game.total}*", parse_mode=ParseMode.MARKDOWN)
         await _start_game(ctx.bot, game)
         return
-    names = ", ".join([p.full_name for p in game.players.values()])
+    names = ", ".join([get_safe_name(p) for p in game.players.values()])
     kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"🎮 Играть ({n}/{game.total})", callback_data="mj")], [InlineKeyboardButton("❌ Отменить", callback_data="mc")]])
     try:
         await ctx.bot.edit_message_text(chat_id=chat.id, message_id=game.join_message_id, text=f"🍁 *Набор*\nНужно: *{game.total}*\nНабрано: *{n}/{game.total}*\n\n👥 {names}", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
@@ -551,10 +563,10 @@ async def _start_game(bot, game):
     random.shuffle(uids)
     for uid, role in zip(uids, roles):
         game.players[uid].role = role
-    mafia_names = [p.full_name for p in game.all_mafia()]
+    mafia_names = [get_safe_name(p) for p in game.all_mafia()]
     
     for p in game.players.values():
-        teammates = [n for n in mafia_names if n != p.full_name]
+        teammates = [n for n in mafia_names if n != get_safe_name(p)]
         text = f"🍁 Твоя роль: *{ROLE_NAMES[p.role]}*\n\n{ROLE_DESCRIPTIONS[p.role]}"
         if p.role == "mafia" and teammates: text += f"\n\n🤝 Союзники: {', '.join(teammates)}"
         try: await bot.send_message(p.user_id, text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🍁 Меню", callback_data="openmenu:0")]]))
@@ -573,10 +585,15 @@ async def _game_loop(bot, game):
             if _check_win(game): break
             await _run_vote(bot, game)
             if _check_win(game): break
-    except: pass
+    except Exception as e:
+        log.error(f"Game loop error: {e}")
     finally:
-        await _announce_end(bot, game)
-        GAMES.pop(game.chat_id, None)
+        try:
+            await _announce_end(bot, game)
+        except Exception as e:
+            log.error(f"Announce end error: {e}")
+        finally:
+            GAMES.pop(game.chat_id, None)
 
 async def _run_night(bot, game):
     game.phase = "night"
@@ -591,7 +608,7 @@ async def _run_night(bot, game):
         elif p.role == "doctor": targets = game.alive_players()
         elif p.role == "medium": targets = [op for op in game.players.values() if not op.alive]
         if not targets: continue
-        rows = [[InlineKeyboardButton(t.full_name, callback_data=f"mn:{game.chat_id}:{t.user_id}")] for t in targets]
+        rows = [[InlineKeyboardButton(get_safe_name(t), callback_data=f"mn:{game.chat_id}:{t.user_id}")] for t in targets]
         try: await bot.send_message(p.user_id, f"🌙 *Ночь*\nВыбери цель:", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
         except: pass
     
@@ -615,27 +632,27 @@ async def _resolve_night(bot, game):
     for tid, src in [(bart_t, "Укрыватель"), (whore_t, "Очаровательница")]:
         if tid and tid in game.players:
             t = game.players[tid]
-            if t.alive: t.muted_until = time.time() + MUTE_DURATION_SEC; msg.append(f"🔇 {t.full_name} замолчал.")
+            if t.alive: t.muted_until = time.time() + MUTE_DURATION_SEC; msg.append(f"🔇 {get_safe_name(t)} замолчал.")
             
     if cop_t:
         c = next((p for p in game.alive_players() if p.role == "cop"), None)
         t = game.players[cop_t]
         is_m = ROLE_TEAM[t.role] == "mafia"
         if t.has_active("fake"): is_m = False; t.consume_active("fake")
-        if c: await _safe_send(bot, c.user_id, f"🔍 {t.full_name} — {'ТЕНЬ' if is_m else 'Житель'}")
+        if c: await _safe_send(bot, c.user_id, f"🔍 {get_safe_name(t)} — {'ТЕНЬ' if is_m else 'Житель'}")
         
     if med_t:
         m = next((p for p in game.alive_players() if p.role == "medium"), None)
         t = game.players[med_t]
-        if m: await _safe_send(bot, m.user_id, f"👻 {t.full_name} был: {ROLE_NAMES[t.role]}")
+        if m: await _safe_send(bot, m.user_id, f"👻 {get_safe_name(t)} был: {ROLE_NAMES[t.role]}")
         
     if m_votes:
         c = Counter(m_votes).most_common()
         if c[0][1] > 1 or len(c) == 1:
             k = c[0][0]; v = game.players[k]
-            if v.has_active("amulet"): v.consume_active("amulet"); msg.append(f"🛡 Оберег спас {v.full_name}!")
-            elif k == doc_t: msg.append(f"💉 Лекарь спас {v.full_name}!")
-            else: v.alive = False; msg.append(f"💀 Убит: {v.full_name}")
+            if v.has_active("amulet"): v.consume_active("amulet"); msg.append(f"🛡 Оберег спас {get_safe_name(v)}!")
+            elif k == doc_t: msg.append(f"💉 Лекарь спас {get_safe_name(v)}!")
+            else: v.alive = False; msg.append(f"💀 Убит: {get_safe_name(v)}")
         else: msg.append("Тени не договорились.")
         
     if not msg: msg.append("Спокойная ночь.")
@@ -643,7 +660,7 @@ async def _resolve_night(bot, game):
 
 async def _run_day(bot, game):
     game.phase = "day"
-    alive_list = [p.full_name for p in game.alive_players()]
+    alive_list = [get_safe_name(p) for p in game.alive_players()]
     alive_str = ", ".join(alive_list)
     
     total = game.total
@@ -670,7 +687,7 @@ async def _run_vote(bot, game):
     game.votes.clear()
     alive = game.alive_players()
     if len(alive) <= 1: return
-    rows = [[InlineKeyboardButton(p.full_name, callback_data=f"mv:{game.chat_id}:{p.user_id}")] for p in alive]
+    rows = [[InlineKeyboardButton(get_safe_name(p), callback_data=f"mv:{game.chat_id}:{p.user_id}")] for p in alive]
     await _send_to_chat(bot, game, f"🗳 *Голосование* 1 мин.", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
     await asyncio.sleep(VOTE_DURATION_SEC)
     
@@ -685,7 +702,7 @@ async def _run_vote(bot, game):
     if c[0][1] >= 2 and (len(c) == 1 or c[0][1] > c[1][1]):
         p = game.players[c[0][0]]
         p.alive = False
-        await _send_to_chat(bot, game, f"⚖️ Изгнан: {p.full_name} ({ROLE_NAMES[p.role]})")
+        await _send_to_chat(bot, game, f"⚖️ Изгнан: {get_safe_name(p)} (<b>{ROLE_NAMES[p.role]}</b>)", parse_mode=ParseMode.HTML)
     else: await _send_to_chat(bot, game, "⚖️ Ничья.")
 
 def _check_win(game):
@@ -696,13 +713,13 @@ def _check_win(game):
 
 async def _announce_end(bot, game):
     game.phase = "ended"
-    header = "🏆 *Победа Жителей!*" if game.winner == "city" else "🏆 *Победа Теней!*"
+    header = "🏆 <b>Победа Жителей!</b>" if game.winner == "city" else "🏆 <b>Победа Теней!</b>"
     
     lines = [header, ""]
     for p in game.players.values():
         status = "жив" if p.alive else "мёртв"
         mark = " (Тень)" if ROLE_TEAM[p.role] == "mafia" else ""
-        lines.append(f"• {p.full_name} — *{ROLE_NAMES[p.role]}*{mark} — {status}")
+        lines.append(f"• {get_safe_name(p)} — <b>{ROLE_NAMES[p.role]}</b>{mark} — {status}")
         
         u = db_get_user(p.user_id)
         u['games'] += 1
@@ -731,7 +748,7 @@ async def _announce_end(bot, game):
         try: await _safe_send(bot, p.user_id, f"🍁 *Игра окончена!*\nТы {'выиграл' if won else 'проиграл'}.\nНаграда: *+{reward}🍁*", parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(p.user_id, game.chat_id))
         except: pass
 
-    await _send_to_chat(bot, game, "\n".join(lines), parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🍁 Меню", callback_data=f"openmenu:{game.chat_id}")]]))
+    await _send_to_chat(bot, game, "\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🍁 Меню", callback_data=f"openmenu:{game.chat_id}")]]))
 
 async def cb_night_action(update, ctx):
     q = update.callback_query
@@ -744,8 +761,8 @@ async def cb_night_action(update, ctx):
     target = game.players.get(target_id)
     if not target: return await q.answer("Нет цели")
     game.night_actions[q.from_user.id] = target_id
-    await q.answer(f"Выбран: {target.full_name}")
-    try: await q.edit_message_text(f"🌙 Выбран: {target.full_name}", parse_mode=ParseMode.MARKDOWN)
+    await q.answer(f"Выбран: {get_safe_name(target)}")
+    try: await q.edit_message_text(f"🌙 Выбран: {get_safe_name(target)}", parse_mode=ParseMode.HTML)
     except: pass
 
 async def cb_vote(update, ctx):
@@ -761,7 +778,7 @@ async def cb_vote(update, ctx):
     if not target or not target.alive: return await q.answer("Цель недоступна", show_alert=True)
     game.votes[q.from_user.id] = target_id
     await q.answer("Голос принят!")
-    await _send_to_chat(ctx.bot, game, f"🗳 *{p.full_name}* голосует против *{target.full_name}*", parse_mode=ParseMode.MARKDOWN)
+    await _send_to_chat(ctx.bot, game, f"🗳 <b>{get_safe_name(p)}</b> голосует против <b>{get_safe_name(target)}</b>", parse_mode=ParseMode.HTML)
 
 async def cb_open_menu(update, ctx):
     q = update.callback_query
@@ -945,7 +962,7 @@ async def cb_inv_use(update, ctx):
             targets = [p for p in game.alive_players() if p.user_id != q.from_user.id]
             if targets:
                 t = random.choice(targets)
-                await _safe_send(ctx.bot, q.from_user.id, f"🍪 Предсказание: {t.full_name} — {ROLE_NAMES[t.role]}")
+                await _safe_send(ctx.bot, q.from_user.id, f"🍪 Предсказание: {get_safe_name(t)} — {ROLE_NAMES[t.role]}")
         db_save_user(q.from_user.id, **u)
         await q.answer("Готово")
         try: await q.edit_message_text("🍪 Предсказание отправлено.", reply_markup=_menu_back_kb(chat_id))
@@ -990,14 +1007,13 @@ async def cb_menu_top(update, ctx):
     
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        rows_coins = conn.execute("SELECT user_id, username, coins FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
-        rows_level = conn.execute("SELECT user_id, username, level FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
+        rows_coins = conn.execute("SELECT user_id, coins FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
+        rows_level = conn.execute("SELECT user_id, level FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
         
     lines = ["🏆 *Топ по листикам*:", ""]
     if rows_coins:
         for i, r in enumerate(rows_coins, 1):
-            name = r['username'] or f"Игрок {r['user_id']}"
-            link = f'<a href="tg://user?id={r["user_id"]}">{name}</a>'
+            link = f'<a href="tg://user?id={r["user_id"]}">👤 Профиль</a>'
             lines.append(f"{i}. {link} — {r['coins']}🍁")
     else:
         lines.append("Пока пусто.")
@@ -1006,8 +1022,7 @@ async def cb_menu_top(update, ctx):
     lines.append("")
     if rows_level:
         for i, r in enumerate(rows_level, 1):
-            name = r['username'] or f"Игрок {r['user_id']}"
-            link = f'<a href="tg://user?id={r["user_id"]}">{name}</a>'
+            link = f'<a href="tg://user?id={r["user_id"]}">👤 Профиль</a>'
             lines.append(f"{i}. {link} — {r['level']} lvl")
     else:
         lines.append("Пока пусто.")
@@ -1047,7 +1062,7 @@ async def cb_admin_users(update, ctx):
         rows = conn.execute("SELECT user_id, username, level FROM users_data").fetchall()
     lines = ["👥 *Юзеры*:"]
     for r in rows[:50]:
-        lines.append(f"`{r['user_id']}` {r['username']} (lvl {r['level']})")
+        lines.append(f"`{r['user_id']}` {html.escape(r['username'] or 'Аноним')} (lvl {r['level']})")
     await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(0))
     await q.answer()
 
@@ -1074,8 +1089,13 @@ async def croc_guess_mw(update, ctx):
         u['coins'] += 10
         if "croc_master" not in u['achievements']: u['achievements'].append("croc_master")
         db_save_user(msg.from_user.id, **u)
+        
+        try:
+            await ctx.bot.send_message(msg.from_user.id, f"🐊 Ты угадал слово <b>{game['word']}</b>!\nНаграда: +10🍁", parse_mode=ParseMode.HTML)
+        except: pass
+        
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]])
-        await msg.reply_text(f"🎉 *{msg.from_user.full_name}* угадал слово *{game['word']}*!\nНаграда: +10🍁\n\nЗагадай следующее:", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+        await msg.reply_text(f"🎉 <b>{get_safe_name(msg.from_user)}</b> угадал слово <b>{game['word']}</b>!\nНаграда: +10🍁\n\nЗагадай следующее:", parse_mode=ParseMode.HTML, reply_markup=kb)
         raise ApplicationHandlerStop
     else:
         try: await msg.set_reaction("❌")
