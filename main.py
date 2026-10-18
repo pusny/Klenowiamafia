@@ -84,7 +84,7 @@ def _init_db():
 
 _init_db()
 
-def db_get_user(user_id):
+def db_get_user(user_id, tg_user=None):
     with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
@@ -92,6 +92,14 @@ def db_get_user(user_id):
             conn.execute("INSERT OR IGNORE INTO users_data (user_id) VALUES (?)", (user_id,))
             conn.commit()
             row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
+            
+        if tg_user:
+            name = tg_user.username or tg_user.full_name
+            if row['username'] != name:
+                conn.execute("UPDATE users_data SET username=? WHERE user_id=?", (name, user_id))
+                conn.commit()
+                row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
+                
         d = dict(row)
         d['inventory'] = json.loads(d['inventory'] or '{}')
         d['achievements'] = json.loads(d['achievements'] or '[]')
@@ -375,24 +383,24 @@ def _menu_main_kb(user_id, chat_id=0):
 def _menu_back_kb(chat_id=0):
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")]])
 
-def _menu_text(uid):
-    u = db_get_user(uid)
+def _menu_text(uid, tg_user=None):
+    u = db_get_user(uid, tg_user)
     return f"🍁 *Меню*\n\nБаланс: *{u['coins']}🍁*\nУровень: *{u['level']}*\nТитул: *{u['title']}*"
 
 async def cmd_dm_start(update, ctx):
     msg = update.effective_message
     if not msg: return
-    await msg.reply_text(_menu_text(msg.from_user.id), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(msg.from_user.id))
+    await msg.reply_text(_menu_text(msg.from_user.id, msg.from_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(msg.from_user.id))
 
 async def cmd_dm_menu(update, ctx):
     msg = update.effective_message
     if not msg: return
-    await msg.reply_text(_menu_text(msg.from_user.id), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(msg.from_user.id))
+    await msg.reply_text(_menu_text(msg.from_user.id, msg.from_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(msg.from_user.id))
 
 async def cmd_dm_other(update, ctx):
     msg = update.effective_message
     uid = update.effective_user.id
-    db_get_user(uid)
+    db_get_user(uid, update.effective_user)
     
     if uid in ADMIN_STATE:
         action = ADMIN_STATE.pop(uid)
@@ -434,7 +442,7 @@ async def cmd_dm_other(update, ctx):
             await msg.reply_text("❌ Ошибка. Пиши: `Слово | Описание`")
         return
         
-    await msg.reply_text(_menu_text(uid), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(uid))
+    await msg.reply_text(_menu_text(uid, update.effective_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(uid))
 
 async def cmd_mafia_start(update, ctx):
     if not _check_thread(update): return
@@ -516,7 +524,7 @@ async def cb_join(update, ctx):
     try: await ctx.bot.send_message(user.id, "🍁 Ты в игре!")
     except: return await q.answer("Сначала нажми /start в ЛС!", show_alert=True)
     
-    u = db_get_user(user.id)
+    u = db_get_user(user.id, user)
     p = Player(user_id=user.id, username=user.username or "", full_name=user.full_name)
     p.coins, p.items, p.achievements, p.wins, p.games = u['coins'], u['inventory'], u['achievements'], u['wins'], u['games']
     p.level, p.title = u['level'], u['title']
@@ -760,7 +768,7 @@ async def cb_open_menu(update, ctx):
     if not q: return
     try: chat_id = int(q.data.split(":")[1])
     except: chat_id = 0
-    await ctx.bot.send_message(q.from_user.id, _menu_text(q.from_user.id), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(q.from_user.id, chat_id))
+    await ctx.bot.send_message(q.from_user.id, _menu_text(q.from_user.id, q.from_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(q.from_user.id, chat_id))
     await q.answer()
 
 async def cb_menu_main(update, ctx):
@@ -768,14 +776,14 @@ async def cb_menu_main(update, ctx):
     if not q: return
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
-    await q.edit_message_text(_menu_text(q.from_user.id), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(q.from_user.id, chat_id))
+    await q.edit_message_text(_menu_text(q.from_user.id, q.from_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(q.from_user.id, chat_id))
     await q.answer()
 
 async def cb_menu_profile(update, ctx):
     q = update.callback_query
     if not q: return
     uid = q.from_user.id
-    u = db_get_user(uid)
+    u = db_get_user(uid, q.from_user)
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
     text = f"👤 *Профиль*\n\n🍁 Листики: *{u['coins']}*\n⭐ Уровень: *{u['level']}*\n👑 Титул: *{u['title']}*\n🏆 Побед: *{u['wins']}* / Игр: *{u['games']}*\n\n🎒 Инвентарь: `{len(u['inventory'])}` предм.\n🏅 Достижений: `{len(u['achievements'])}`"
@@ -787,7 +795,7 @@ async def cb_menu_ach(update, ctx):
     if not q: return
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
-    u = db_get_user(q.from_user.id)
+    u = db_get_user(q.from_user.id, q.from_user)
     lines = ["🏅 *Достижения*", ""]
     for k, v in ALL_ACHIEVEMENTS.items():
         lines.append(("✅ " if k in u['achievements'] else "❌ ") + v)
@@ -799,7 +807,7 @@ async def cb_menu_titles(update, ctx):
     if not q: return
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
-    u = db_get_user(q.from_user.id)
+    u = db_get_user(q.from_user.id, q.from_user)
     
     text = f"👑 *Титулы*\n\nТекущий: *{u['title']}*\nТвои достижения: `{len(u['achievements'])}`\n\n"
     rows = []
@@ -858,7 +866,7 @@ async def cb_menu_shop(update, ctx):
     if not q: return
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
-    u = db_get_user(q.from_user.id)
+    u = db_get_user(q.from_user.id, q.from_user)
     rows = []
     for iid, item in SHOP_ITEMS.items():
         rows.append([InlineKeyboardButton(f"{item['emoji']} {item['name']} — {item['price']}🍁", callback_data=f"shop:item:{chat_id}:{iid}")])
@@ -882,7 +890,7 @@ async def cb_shop_buy(update, ctx):
     if not q: return
     parts = q.data.split(":")
     chat_id, iid = int(parts[2]), parts[3]
-    u = db_get_user(q.from_user.id)
+    u = db_get_user(q.from_user.id, q.from_user)
     item = SHOP_ITEMS.get(iid)
     if u['coins'] < item['price']: return await q.answer("Мало листиков!", show_alert=True)
     u['coins'] -= item['price']
@@ -897,7 +905,7 @@ async def cb_menu_inv(update, ctx):
     if not q: return
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
-    u = db_get_user(q.from_user.id)
+    u = db_get_user(q.from_user.id, q.from_user)
     rows = []
     for iid, cnt in u['inventory'].items():
         if iid in SHOP_ITEMS and cnt > 0:
@@ -926,7 +934,7 @@ async def cb_inv_use(update, ctx):
     if not q: return
     parts = q.data.split(":")
     chat_id, iid, mode = int(parts[2]), parts[3], parts[4]
-    u = db_get_user(q.from_user.id)
+    u = db_get_user(q.from_user.id, q.from_user)
     if u['inventory'].get(iid, 0) <= 0: return await q.answer("Нет предмета")
     u['inventory'][iid] -= 1
     if u['inventory'][iid] == 0: del u['inventory'][iid]
@@ -959,7 +967,7 @@ async def cb_menu_bonus(update, ctx):
     if not q: return
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
-    u = db_get_user(q.from_user.id)
+    u = db_get_user(q.from_user.id, q.from_user)
     if time.time() - u['last_bonus'] < 86400: return await q.answer("Бонус раз в сутки!", show_alert=True)
     
     bonus_amount = 5
@@ -979,13 +987,32 @@ async def cb_menu_top(update, ctx):
     if not q: return
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
+    
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT username, coins FROM users_data ORDER BY coins DESC LIMIT 10").fetchall()
-    lines = ["🏆 *Топ богачей*:", ""]
-    for i, r in enumerate(rows, 1):
-        lines.append(f"{i}. {r['username'] or 'Аноним'} — {r['coins']}🍁")
-    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
+        rows_coins = conn.execute("SELECT user_id, username, coins FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
+        rows_level = conn.execute("SELECT user_id, username, level FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
+        
+    lines = ["🏆 *Топ по листикам*:", ""]
+    if rows_coins:
+        for i, r in enumerate(rows_coins, 1):
+            name = r['username'] or f"Игрок {r['user_id']}"
+            link = f'<a href="tg://user?id={r["user_id"]}">{name}</a>'
+            lines.append(f"{i}. {link} — {r['coins']}🍁")
+    else:
+        lines.append("Пока пусто.")
+        
+    lines.append("\n⭐ *Топ по уровню*:")
+    lines.append("")
+    if rows_level:
+        for i, r in enumerate(rows_level, 1):
+            name = r['username'] or f"Игрок {r['user_id']}"
+            link = f'<a href="tg://user?id={r["user_id"]}">{name}</a>'
+            lines.append(f"{i}. {link} — {r['level']} lvl")
+    else:
+        lines.append("Пока пусто.")
+        
+    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
     await q.answer()
 
 async def cb_admin_main(update, ctx):
@@ -1040,13 +1067,19 @@ async def croc_guess_mw(update, ctx):
     
     if msg.text.strip().lower() == game["word"].lower():
         CROC_GAME.pop(msg.chat.id, None)
-        u = db_get_user(msg.from_user.id)
+        try: await msg.set_reaction("✅")
+        except: pass
+        
+        u = db_get_user(msg.from_user.id, msg.from_user)
         u['coins'] += 10
         if "croc_master" not in u['achievements']: u['achievements'].append("croc_master")
         db_save_user(msg.from_user.id, **u)
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]])
         await msg.reply_text(f"🎉 *{msg.from_user.full_name}* угадал слово *{game['word']}*!\nНаграда: +10🍁\n\nЗагадай следующее:", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
         raise ApplicationHandlerStop
+    else:
+        try: await msg.set_reaction("❌")
+        except: pass
 
 async def cb_noop(update, ctx):
     await update.callback_query.answer()
