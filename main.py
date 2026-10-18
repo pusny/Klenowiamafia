@@ -222,7 +222,9 @@ def db_get_user(user_id, tg_user=None):
         d['city_wins'] = int(d.get('city_wins') or 0)
         
         total_xp = d['wins'] * 2 + d['games'] + d['croc_wins']
-        d['level'] = total_xp // 5 + 1
+        calc_level = total_xp // 5 + 1
+        stored_level = int(d.get('level') or 1)
+        d['level'] = max(calc_level, stored_level)
         
         if d['title'] not in d['unlocked_titles']:
             d['unlocked_titles'].append(d['title'])
@@ -244,6 +246,33 @@ def db_save_user(uid, **kwargs):
             u['croc_wins'], u['mafia_wins'], u['city_wins'], uid
         ))
         conn.commit()
+
+def _check_rich_achievements(uid):
+    u = db_get_user(uid)
+    changed = False
+    if u['coins'] >= 100 and "rich_100" not in u['achievements']:
+        u['achievements'].append("rich_100")
+        changed = True
+    if u['coins'] >= 1000 and "rich_1000" not in u['achievements']:
+        u['achievements'].append("rich_1000")
+        changed = True
+    if changed:
+        db_save_user(uid, achievements=u['achievements'])
+
+def _check_level_achievements(uid):
+    u = db_get_user(uid)
+    changed = False
+    if u['level'] >= 5 and "level_5" not in u['achievements']:
+        u['achievements'].append("level_5")
+        changed = True
+    if u['level'] >= 10 and "level_10" not in u['achievements']:
+        u['achievements'].append("level_10")
+        changed = True
+    if u['level'] >= 20 and "level_20" not in u['achievements']:
+        u['achievements'].append("level_20")
+        changed = True
+    if changed:
+        db_save_user(uid, achievements=u['achievements'])
 
 def is_chat_activated(chat_id):
     with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
@@ -468,10 +497,12 @@ async def cmd_dm_other(update, ctx):
                 target, amount = int(parts[0].replace("@", "")), int(parts[1])
                 u = db_get_user(target)
                 db_save_user(target, coins=u['coins']+amount)
+                _check_rich_achievements(target)
                 await msg.reply_text(f"✅ Выдано {amount}🍁 юзеру {target}", reply_markup=_menu_main_kb(uid))
             elif action == "give_level" and len(parts) >= 2:
                 target, lvl = int(parts[0].replace("@", "")), int(parts[1])
                 db_save_user(target, level=lvl)
+                _check_level_achievements(target)
                 await msg.reply_text(f"✅ Выдан уровень {lvl} юзеру {target}", reply_markup=_menu_main_kb(uid))
             elif action == "give_title" and len(parts) >= 2:
                 target = int(parts[0].replace("@", ""))
@@ -524,6 +555,7 @@ async def cmd_dm_other(update, ctx):
             win = bet * 2
             u['coins'] += win
             db_save_user(uid, **u)
+            _check_rich_achievements(uid)
             await msg.reply_text(f"🎆🎇🎉 <b>ПОБЕДА!</b> 🎉🎇🎆\n\nТы выиграл <b>{win}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>\n\n<i>Можешь ввести следующую ставку!</i>", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
         else:
             db_save_user(uid, **u)
@@ -864,7 +896,8 @@ async def _announce_end(bot, game):
         u['coins'] += reward
         xp_gained = 3 if won else 1
         
-        new_lvl = (u['wins'] * 2 + u['games'] + u['croc_wins']) // 5 + 1
+        calc = (u['wins'] * 2 + u['games'] + u['croc_wins']) // 5 + 1
+        new_lvl = max(calc, int(u.get('level') or 1))
         u['level'] = new_lvl
         
         if u['coins'] >= 100 and "rich_100" not in u['achievements']: u['achievements'].append("rich_100")
@@ -1178,6 +1211,7 @@ async def cb_menu_bonus(update, ctx):
     u['coins'] += bonus_amount
     u['last_bonus'] = time.time()
     db_save_user(q.from_user.id, **u)
+    _check_rich_achievements(q.from_user.id)
     
     await q.answer(f"+{bonus_amount}🍁")
     await q.edit_message_text(f"🍁 <b>Бонус</b> +{bonus_amount}🍁\nБаланс: {u['coins']}", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
@@ -1330,19 +1364,24 @@ async def croc_guess_mw(update, ctx):
             pass
         
         u = db_get_user(msg.from_user.id, msg.from_user)
-        old_lvl = (u['wins'] * 2 + u['games'] + u['croc_wins']) // 5 + 1
+        old_lvl = u['level']
         
         u['coins'] += 5
         u['croc_wins'] += 1
         
-        new_lvl = (u['wins'] * 2 + u['games'] + u['croc_wins']) // 5 + 1
+        calc = (u['wins'] * 2 + u['games'] + u['croc_wins']) // 5 + 1
+        new_lvl = max(calc, int(u.get('level') or 1))
         u['level'] = new_lvl
         
         if "croc_1" not in u['achievements']: u['achievements'].append("croc_1")
         if u['croc_wins'] >= 10 and "croc_10" not in u['achievements']: u['achievements'].append("croc_10")
         if u['croc_wins'] >= 50 and "croc_50" not in u['achievements']: u['achievements'].append("croc_50")
+        if new_lvl >= 5 and "level_5" not in u['achievements']: u['achievements'].append("level_5")
+        if new_lvl >= 10 and "level_10" not in u['achievements']: u['achievements'].append("level_10")
+        if new_lvl >= 20 and "level_20" not in u['achievements']: u['achievements'].append("level_20")
         
         db_save_user(msg.from_user.id, **u)
+        _check_rich_achievements(msg.from_user.id)
         
         msg_text = f"🐊 Ты угадал слово <b>{game['word']}</b>!\nНаграда: +5🍁\nОпыт: <b>+2 XP</b>"
         if new_lvl > old_lvl:
