@@ -1240,11 +1240,14 @@ async def cb_vote(update, ctx):
         await q.answer("Цель недоступна", show_alert=True)
         return
     game.votes[user.id] = target_id
-    await q.answer(f"Голос за {target.full_name}")
+    await q.answer(f"Голос за {target.full_name} принят!")
+    
     try:
-        await q.edit_message_text(
-            f"🗳 Твой голос: *{target.full_name}*",
-            parse_mode=ParseMode.MARKDOWN)
+        await _send_to_chat(
+            ctx.bot, game,
+            f"🗳 *{p.full_name}* голосует против *{target.full_name}*",
+            parse_mode=ParseMode.MARKDOWN
+        )
     except Exception:
         pass
 
