@@ -52,161 +52,6 @@ DB_DIR = Path(os.getenv("DATA_DIR", "."))
 DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = str(DB_DIR / "mafia.db")
 
-def _init_db():
-    with sqlite3.connect(DB_PATH, timeout=15.0) as conn:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=10000")
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS activations (
-                chat_id INTEGER PRIMARY KEY
-            );
-            CREATE TABLE IF NOT EXISTS pending_activations (
-                chat_id INTEGER PRIMARY KEY,
-                key TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS bot_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            );
-            CREATE TABLE IF NOT EXISTS users_data (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                coins INTEGER DEFAULT 0,
-                level INTEGER DEFAULT 1,
-                title TEXT DEFAULT 'Новичок',
-                wins INTEGER DEFAULT 0,
-                games INTEGER DEFAULT 0,
-                inventory TEXT DEFAULT '{}',
-                achievements TEXT DEFAULT '[]',
-                unlocked_titles TEXT DEFAULT '["Новичок"]',
-                last_bonus REAL DEFAULT 0,
-                croc_wins INTEGER DEFAULT 0,
-                mafia_wins INTEGER DEFAULT 0,
-                city_wins INTEGER DEFAULT 0
-            );
-        """)
-        
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(users_data)")}
-        if "unlocked_titles" not in cols:
-            conn.execute("ALTER TABLE users_data ADD COLUMN unlocked_titles TEXT DEFAULT '[\"Новичок\"]'")
-        if "croc_wins" not in cols:
-            conn.execute("ALTER TABLE users_data ADD COLUMN croc_wins INTEGER DEFAULT 0")
-        if "mafia_wins" not in cols:
-            conn.execute("ALTER TABLE users_data ADD COLUMN mafia_wins INTEGER DEFAULT 0")
-        if "city_wins" not in cols:
-            conn.execute("ALTER TABLE users_data ADD COLUMN city_wins INTEGER DEFAULT 0")
-            
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('casino_chance', '45')")
-        conn.commit()
-
-_init_db()
-
-def db_get_setting(key, default=""):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        row = conn.execute("SELECT value FROM bot_settings WHERE key=?", (key,)).fetchone()
-        return row[0] if row else default
-
-def db_set_setting(key, value):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        conn.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, str(value)))
-        conn.commit()
-
-def get_safe_name(user_or_player):
-    if hasattr(user_or_player, 'full_name'):
-        name = user_or_player.full_name
-    else:
-        name = user_or_player
-    if not name or not str(name).strip():
-        return "Игрок"
-    return html.escape(str(name))
-
-def db_get_user(user_id, tg_user=None):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
-        if not row:
-            conn.execute("INSERT OR IGNORE INTO users_data (user_id) VALUES (?)", (user_id,))
-            conn.commit()
-            row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
-            
-        if tg_user:
-            name = tg_user.username or tg_user.full_name
-            if not name or not name.strip():
-                name = f"Игрок {user_id}"
-            if row['username'] != name:
-                conn.execute("UPDATE users_data SET username=? WHERE user_id=?", (name, user_id))
-                conn.commit()
-                row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
-                
-        d = dict(row)
-        d['inventory'] = json.loads(d['inventory'] or '{}')
-        d['achievements'] = json.loads(d['achievements'] or '[]')
-        d['unlocked_titles'] = json.loads(d.get('unlocked_titles') or '["Новичок"]')
-        
-        d['coins'] = int(d.get('coins') or 0)
-        d['wins'] = int(d.get('wins') or 0)
-        d['games'] = int(d.get('games') or 0)
-        d['last_bonus'] = float(d.get('last_bonus') or 0.0)
-        d['croc_wins'] = int(d.get('croc_wins') or 0)
-        d['mafia_wins'] = int(d.get('mafia_wins') or 0)
-        d['city_wins'] = int(d.get('city_wins') or 0)
-        
-        total_xp = d['wins'] * 2 + d['games'] + d['croc_wins']
-        d['level'] = total_xp // 5 + 1
-        
-        if d['title'] not in d['unlocked_titles']:
-            d['unlocked_titles'].append(d['title'])
-        return d
-
-def db_save_user(uid, **kwargs):
-    u = db_get_user(uid)
-    for k, v in kwargs.items():
-        if k in u:
-            u[k] = v
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        conn.execute("""
-            UPDATE users_data SET 
-                username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?, croc_wins=?, mafia_wins=?, city_wins=?
-            WHERE user_id=?
-        """, (
-            u['username'], u['coins'], u['level'], u['title'], u['wins'], u['games'],
-            json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'],
-            u['croc_wins'], u['mafia_wins'], u['city_wins'], uid
-        ))
-        conn.commit()
-
-def is_chat_activated(chat_id):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        row = conn.execute("SELECT 1 FROM activations WHERE chat_id=?", (chat_id,)).fetchone()
-        return row is not None
-
-def activate_chat(chat_id):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        conn.execute("INSERT OR IGNORE INTO activations (chat_id) VALUES (?)", (chat_id,))
-        conn.commit()
-
-def get_pending_key(chat_id):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        row = conn.execute("SELECT key FROM pending_activations WHERE chat_id=?", (chat_id,)).fetchone()
-        return row[0] if row else None
-
-def set_pending_key(chat_id, key):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        conn.execute("INSERT OR REPLACE INTO pending_activations (chat_id, key) VALUES (?, ?)", (chat_id, key))
-        conn.commit()
-
-def clear_pending_key(chat_id):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        conn.execute("DELETE FROM pending_activations WHERE chat_id=?", (chat_id,))
-        conn.commit()
-
-def _gen_key():
-    alphabet = string.ascii_uppercase + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(12))
-
-def _log_activation_key(chat_id, chat_title, key):
-    print(f"=== KEY: {key} for chat {chat_title} ({chat_id}) ===", flush=True)
-
 ROLE_NAMES = {
     "mafia": "Тень", "cop": "Смотритель", "doctor": "Лекарь",
     "bartender": "Укрыватель", "whore": "Очаровательница",
@@ -255,7 +100,6 @@ TITLES_SHOP = {
     "king": {"name": "Осенний Король", "emoji": "👑", "price": 400, "ach_req": 0, "daily_bonus": 25},
     "donater": {"name": "Меценат", "emoji": "💎", "price": 700, "ach_req": 0, "daily_bonus": 40},
     "rich_boy": {"name": "Золотой Скрудж", "emoji": "💰", "price": 1200, "ach_req": 0, "daily_bonus": 70},
-    
     "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 5, "daily_bonus": 15},
     "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 10, "daily_bonus": 25},
     "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 15, "daily_bonus": 45},
@@ -284,15 +128,9 @@ ALL_ACHIEVEMENTS = {
     "level_20": "✨ Достигнут 20 уровень"
 }
 
-JOIN_TIMEOUT_SEC = 300
-NIGHT_ACTION_TIMEOUT = 60
-VOTE_DURATION_SEC = 60
-MUTE_DURATION_SEC = 5 * 60
-
 ACTIVATION_REGEX = re.compile(r"(?i)^(?:/)?(?:активация|activate)(?:\s+\S+)?$")
 MAFIA_START_REGEX = re.compile(r"(?i)^мафия\s+(?:начать|старт)$")
 MAFIA_STOP_REGEX = re.compile(r"(?i)^мафия\s+(?:стоп|stop)$")
-
 CROCODILE_REGEX = re.compile(r"(?i)^/?(?:крокодил|слова|crocodile|words)(?:\s+(?:начать|старт))?$")
 CROCODILE_STOP_REGEX = re.compile(r"(?i)^/?(?:крокодил|слова|crocodile|words)\s+(?:стоп|stop)$")
 
@@ -301,10 +139,174 @@ CROC_AWAITING = {}
 CROC_ACTIVE = set()
 ADMIN_STATE = {}
 CASINO_AWAITING = set()
+GAMES = {}
+
+
+def _init_db():
+    with sqlite3.connect(DB_PATH, timeout=15.0) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS activations (chat_id INTEGER PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS pending_activations (chat_id INTEGER PRIMARY KEY, key TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE IF NOT EXISTS users_data (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                coins INTEGER DEFAULT 0,
+                level INTEGER DEFAULT 1,
+                title TEXT DEFAULT 'Новичок',
+                wins INTEGER DEFAULT 0,
+                games INTEGER DEFAULT 0,
+                inventory TEXT DEFAULT '{}',
+                achievements TEXT DEFAULT '[]',
+                unlocked_titles TEXT DEFAULT '["Новичок"]',
+                last_bonus REAL DEFAULT 0,
+                croc_wins INTEGER DEFAULT 0,
+                mafia_wins INTEGER DEFAULT 0,
+                city_wins INTEGER DEFAULT 0
+            );
+        """)
+        
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(users_data)")}
+        if "unlocked_titles" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN unlocked_titles TEXT DEFAULT '[\"Новичок\"]'")
+        if "croc_wins" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN croc_wins INTEGER DEFAULT 0")
+        if "mafia_wins" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN mafia_wins INTEGER DEFAULT 0")
+        if "city_wins" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN city_wins INTEGER DEFAULT 0")
+            
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('casino_chance', '45')")
+        conn.commit()
+
+_init_db()
+
+def db_get_setting(key, default=""):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        row = conn.execute("SELECT value FROM bot_settings WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+def db_set_setting(key, value):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, str(value)))
+        conn.commit()
+
+def db_get_user(user_id, tg_user=None):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
+        if not row:
+            conn.execute("INSERT OR IGNORE INTO users_data (user_id) VALUES (?)", (user_id,))
+            conn.commit()
+            row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
+            
+        if tg_user:
+            name = tg_user.username or tg_user.full_name or f"Игрок {user_id}"
+            if row['username'] != name:
+                conn.execute("UPDATE users_data SET username=? WHERE user_id=?", (name, user_id))
+                conn.commit()
+                row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
+                
+        d = dict(row)
+        d['inventory'] = json.loads(d['inventory'] or '{}')
+        d['achievements'] = json.loads(d['achievements'] or '[]')
+        d['unlocked_titles'] = json.loads(d.get('unlocked_titles') or '["Новичок"]')
+        d['coins'] = int(d.get('coins') or 0)
+        d['wins'] = int(d.get('wins') or 0)
+        d['games'] = int(d.get('games') or 0)
+        d['last_bonus'] = float(d.get('last_bonus') or 0.0)
+        d['croc_wins'] = int(d.get('croc_wins') or 0)
+        d['mafia_wins'] = int(d.get('mafia_wins') or 0)
+        d['city_wins'] = int(d.get('city_wins') or 0)
+        
+        total_xp = d['wins'] * 2 + d['games'] + d['croc_wins']
+        d['level'] = total_xp // 5 + 1
+        
+        if d['title'] not in d['unlocked_titles']:
+            d['unlocked_titles'].append(d['title'])
+        return d
+
+def db_save_user(uid, **kwargs):
+    u = db_get_user(uid)
+    for k, v in kwargs.items():
+        if k in u:
+            u[k] = v
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute("""
+            UPDATE users_data SET 
+                username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?, croc_wins=?, mafia_wins=?, city_wins=?
+            WHERE user_id=?
+        """, (
+            u['username'], u['coins'], u['level'], u['title'], u['wins'], u['games'],
+            json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'],
+            u['croc_wins'], u['mafia_wins'], u['city_wins'], uid
+        ))
+        conn.commit()
+
+def is_chat_activated(chat_id):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        return conn.execute("SELECT 1 FROM activations WHERE chat_id=?", (chat_id,)).fetchone() is not None
+
+def activate_chat(chat_id):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute("INSERT OR IGNORE INTO activations (chat_id) VALUES (?)", (chat_id,))
+        conn.commit()
+
+def get_pending_key(chat_id):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        row = conn.execute("SELECT key FROM pending_activations WHERE chat_id=?", (chat_id,)).fetchone()
+        return row[0] if row else None
+
+def set_pending_key(chat_id, key):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute("INSERT OR REPLACE INTO pending_activations (chat_id, key) VALUES (?, ?)", (chat_id, key))
+        conn.commit()
+
+def clear_pending_key(chat_id):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute("DELETE FROM pending_activations WHERE chat_id=?", (chat_id,))
+        conn.commit()
+
+def get_safe_name(user_or_player):
+    name = getattr(user_or_player, 'full_name', str(user_or_player))
+    if not name or not str(name).strip():
+        return "Игрок"
+    return html.escape(str(name))
 
 def get_roles(count):
     spec = ROLE_DISTRIBUTION.get(count)
     return [_ROLE_MAP[t] for t in spec.split()] if spec else None
+
+def _check_thread(update):
+    if THREAD_ID <= 0: 
+        return True
+    msg = update.effective_message
+    if msg is None: 
+        return False
+    if msg.chat.type == "private": 
+        return True
+    return (msg.message_thread_id or 0) == THREAD_ID
+
+async def _is_chat_admin(bot, chat_id, user_id):
+    try:
+        m = await bot.get_chat_member(chat_id, user_id)
+        return m.status in ("creator", "administrator")
+    except Exception: 
+        return False
+
+async def _safe_send(bot, user_id, text, **kwargs):
+    try:
+        await bot.send_message(user_id, text, **kwargs)
+        return True
+    except Exception: 
+        return False
+
+async def _send_to_chat(bot, game, text, **kwargs):
+    if game.thread_id:
+        kwargs["message_thread_id"] = game.thread_id
+    return await bot.send_message(game.chat_id, text, **kwargs)
 
 @dataclass
 class Player:
@@ -322,7 +324,6 @@ class Player:
     games: int = 0
     level: int = 1
     title: str = "Новичок"
-    bonus_claimed: bool = False
 
     def is_muted(self):
         return time.time() < self.muted_until
@@ -360,79 +361,6 @@ class Game:
     def all_mafia(self):
         return [p for p in self.players.values() if p.role == "mafia"]
 
-GAMES = {}
-
-def _check_thread(update):
-    if THREAD_ID <= 0: return True
-    msg = update.effective_message
-    if msg is None: return False
-    if msg.chat.type == "private": return True
-    return (msg.message_thread_id or 0) == THREAD_ID
-
-async def _is_chat_admin(bot, chat_id, user_id):
-    try:
-        m = await bot.get_chat_member(chat_id, user_id)
-        return m.status in ("creator", "administrator")
-    except: return False
-
-async def _safe_send(bot, user_id, text, **kwargs):
-    try:
-        await bot.send_message(user_id, text, **kwargs)
-        return True
-    except: return False
-
-async def _send_to_chat(bot, game, text, **kwargs):
-    if game.thread_id:
-        kwargs["message_thread_id"] = game.thread_id
-    return await bot.send_message(game.chat_id, text, **kwargs)
-
-async def activation_mw(update, ctx):
-    msg = update.effective_message
-    if msg is None or msg.chat.type == "private": return
-    if is_chat_activated(msg.chat.id): return
-    if ACTIVATION_REGEX.match((msg.text or "").strip()): return
-    raise ApplicationHandlerStop
-
-async def on_bot_added(update, ctx):
-    cm = update.my_chat_member
-    if cm is None or cm.new_chat_member.user.id != (await ctx.bot.get_me()).id: return
-    if cm.new_chat_member.status not in ("member", "administrator") or cm.old_chat_member.status not in ("left", "kicked"): return
-    if cm.chat.type == "private" or is_chat_activated(cm.chat.id) or get_pending_key(cm.chat.id): return
-    key = _gen_key()
-    set_pending_key(cm.chat.id, key)
-    _log_activation_key(cm.chat.id, cm.chat.title or "", key)
-    await ctx.bot.send_message(cm.chat.id, "🍁 Для активации введите:\n<code>активация КЛЮЧ</code>", parse_mode=ParseMode.HTML)
-
-async def cmd_activate(update, ctx):
-    msg = update.effective_message
-    user = update.effective_user
-    if not msg or not user or msg.chat.type == "private" or is_chat_activated(msg.chat.id): return
-    parts = (msg.text or "").lower().lstrip("/").split()
-    if len(parts) < 2:
-        if await _is_chat_admin(ctx.bot, msg.chat.id, user.id):
-            key = get_pending_key(msg.chat.id) or _gen_key()
-            set_pending_key(msg.chat.id, key)
-            _log_activation_key(msg.chat.id, msg.chat.title or "", key)
-        return
-    if parts[1].strip().upper() == (get_pending_key(msg.chat.id) or "").upper():
-        activate_chat(msg.chat.id)
-        clear_pending_key(msg.chat.id)
-        await msg.reply_text("✅ Чат активирован!")
-
-async def guard_muted_messages(update, ctx):
-    msg = update.effective_message
-    if not msg or msg.chat.type == "private": return
-    user = update.effective_user
-    if not user or user.is_bot or not _check_thread(update): return
-    game = GAMES.get(msg.chat.id)
-    if not game or (msg.message_thread_id or 0) != game.thread_id: return
-    if await _is_chat_admin(ctx.bot, msg.chat.id, user.id): return
-    p = game.players.get(user.id)
-    if not p: return
-    if game.phase == "night" or not p.alive or p.is_muted():
-        try: await msg.delete()
-        except: pass
-        raise ApplicationHandlerStop
 
 def _menu_main_kb(user_id, chat_id=0):
     rows = [
@@ -451,17 +379,80 @@ def _menu_back_kb(chat_id=0):
 
 def _menu_text(uid, tg_user=None):
     u = db_get_user(uid, tg_user)
-    return f"🍁 *Меню*\n\nБаланс: *{u['coins']}🍁*\nУровень: *{u['level']}*\nТитул: *{u['title']}*"
+    return f"🍁 <b>Меню</b>\n\nБаланс: <b>{u['coins']}🍁</b>\nУровень: <b>{u['level']}</b>\nТитул: <b>{u['title']}</b>"
+
+
+async def activation_mw(update, ctx):
+    msg = update.effective_message
+    if msg is None or msg.chat.type == "private": return
+    if is_chat_activated(msg.chat.id): return
+    if ACTIVATION_REGEX.match((msg.text or "").strip()): return
+    raise ApplicationHandlerStop
+
+async def on_bot_added(update, ctx):
+    cm = update.my_chat_member
+    if cm is None or cm.new_chat_member.user.id != (await ctx.bot.get_me()).id: return
+    if cm.new_chat_member.status not in ("member", "administrator") or cm.old_chat_member.status not in ("left", "kicked"): return
+    if cm.chat.type == "private" or is_chat_activated(cm.chat.id) or get_pending_key(cm.chat.id): return
+    
+    alphabet = string.ascii_uppercase + string.digits
+    key = "".join(secrets.choice(alphabet) for _ in range(12))
+    set_pending_key(cm.chat.id, key)
+    
+    log.warning("=== KEY: %s for chat %s (%s) ===", key, cm.chat.title, cm.chat.id)
+    await ctx.bot.send_message(cm.chat.id, "🍁 Для активации введите:\n<code>активация КЛЮЧ</code>", parse_mode=ParseMode.HTML)
+
+async def cmd_activate(update, ctx):
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user or msg.chat.type == "private" or is_chat_activated(msg.chat.id): return
+    
+    parts = (msg.text or "").lower().lstrip("/").split()
+    if len(parts) < 2:
+        if await _is_chat_admin(ctx.bot, msg.chat.id, user.id):
+            key = get_pending_key(msg.chat.id)
+            if not key:
+                alphabet = string.ascii_uppercase + string.digits
+                key = "".join(secrets.choice(alphabet) for _ in range(12))
+                set_pending_key(msg.chat.id, key)
+            log.warning("=== KEY: %s for chat %s (%s) ===", key, msg.chat.title, msg.chat.id)
+        return
+        
+    if parts[1].strip().upper() == (get_pending_key(msg.chat.id) or "").upper():
+        activate_chat(msg.chat.id)
+        clear_pending_key(msg.chat.id)
+        await msg.reply_text("✅ Чат активирован!")
+
+async def guard_muted_messages(update, ctx):
+    msg = update.effective_message
+    if not msg or msg.chat.type == "private": return
+    user = update.effective_user
+    if not user or user.is_bot or not _check_thread(update): return
+    
+    game = GAMES.get(msg.chat.id)
+    if not game or (msg.message_thread_id or 0) != game.thread_id: return
+    if await _is_chat_admin(ctx.bot, msg.chat.id, user.id): return
+    
+    p = game.players.get(user.id)
+    if not p: return
+    
+    if game.phase == "night" or not p.alive or p.is_muted():
+        try: 
+            await msg.delete()
+        except Exception: 
+            pass
+        raise ApplicationHandlerStop
+
 
 async def cmd_dm_start(update, ctx):
     msg = update.effective_message
-    if not msg: return
-    await msg.reply_text(_menu_text(msg.from_user.id, msg.from_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(msg.from_user.id))
+    if msg:
+        await msg.reply_text(_menu_text(msg.from_user.id, msg.from_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(msg.from_user.id))
 
 async def cmd_dm_menu(update, ctx):
     msg = update.effective_message
-    if not msg: return
-    await msg.reply_text(_menu_text(msg.from_user.id, msg.from_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(msg.from_user.id))
+    if msg:
+        await msg.reply_text(_menu_text(msg.from_user.id, msg.from_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(msg.from_user.id))
 
 async def cmd_dm_other(update, ctx):
     msg = update.effective_message
@@ -485,47 +476,31 @@ async def cmd_dm_other(update, ctx):
         chance = int(db_get_setting("casino_chance", "45"))
         u['coins'] -= bet
         
-        roll = random.randint(1, 100)
-        if roll <= chance:
+        if random.randint(1, 100) <= chance:
             win = bet * 2
             u['coins'] += win
             db_save_user(uid, **u)
-            await msg.reply_text(
-                f"🎆🎇🎉 *ПОБЕДА!* 🎉🎇🎆\n\n"
-                f"Ты выиграл *{win}🍁*!\n"
-                f"Твой баланс: *{u['coins']}🍁*",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=_menu_main_kb(uid)
-            )
+            await msg.reply_text(f"🎆🎇🎉 <b>ПОБЕДА!</b> 🎉🎇🎆\n\nТы выиграл <b>{win}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
         else:
             db_save_user(uid, **u)
-            await msg.reply_text(
-                f"💀 *Проигрыш...*\n\n"
-                f"Ты потерял *{bet}🍁*.\n"
-                f"Твой баланс: *{u['coins']}🍁*",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=_menu_main_kb(uid)
-            )
+            await msg.reply_text(f"💀 <b>Проигрыш...</b>\n\nТы потерял <b>{bet}🍁</b>.\nТвой баланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
         return
 
     if uid in ADMIN_STATE:
         action = ADMIN_STATE.pop(uid)
         parts = msg.text.split(maxsplit=2)
-        if action == "give_coins" and len(parts) >= 2:
-            try:
+        
+        try:
+            if action == "give_coins" and len(parts) >= 2:
                 target, amount = int(parts[0].replace("@", "")), int(parts[1])
                 u = db_get_user(target)
                 db_save_user(target, coins=u['coins']+amount)
                 await msg.reply_text(f"✅ Выдано {amount}🍁 юзеру {target}")
-            except: await msg.reply_text("❌ Ошибка. Нужно: `ID количество`")
-        elif action == "give_level" and len(parts) >= 2:
-            try:
+            elif action == "give_level" and len(parts) >= 2:
                 target, lvl = int(parts[0].replace("@", "")), int(parts[1])
                 db_save_user(target, level=lvl)
                 await msg.reply_text(f"✅ Выдан уровень {lvl} юзеру {target}")
-            except: await msg.reply_text("❌ Ошибка.")
-        elif action == "give_title" and len(parts) >= 2:
-            try:
+            elif action == "give_title" and len(parts) >= 2:
                 target = int(parts[0].replace("@", ""))
                 title = " ".join(parts[1:])
                 u = db_get_user(target)
@@ -533,16 +508,13 @@ async def cmd_dm_other(update, ctx):
                     u['unlocked_titles'].append(title)
                 db_save_user(target, title=title, unlocked_titles=u['unlocked_titles'])
                 await msg.reply_text(f"✅ Выдан титул '{title}' юзеру {target}")
-            except Exception as e: 
-                await msg.reply_text(f"❌ Ошибка: {e}")
-        elif action == "casino_chance":
-            try:
+            elif action == "casino_chance":
                 chance = int(parts[0])
                 if chance < 1 or chance > 99: raise ValueError
                 db_set_setting("casino_chance", str(chance))
                 await msg.reply_text(f"✅ Шанс победы в казино теперь: {chance}%")
-            except:
-                await msg.reply_text("❌ Ошибка. Введи число от 1 до 99.")
+        except Exception:
+            await msg.reply_text("❌ Ошибка. Проверь формат ввода.")
         return
 
     if uid in CROC_AWAITING:
@@ -553,12 +525,14 @@ async def cmd_dm_other(update, ctx):
             try:
                 await ctx.bot.send_message(chat_id, f"🐊 <b>Крокодил!</b>\n\nОписание: {html.escape(desc.strip())}\n\nКто угадает слово, пишите в чат!", message_thread_id=THREAD_ID or 0, parse_mode=ParseMode.HTML)
                 await msg.reply_text("✅ Слово загадано!")
-            except: pass
+            except Exception:
+                pass
         else:
             await msg.reply_text("❌ Ошибка. Пиши: `Слово | Описание`")
         return
         
-    await msg.reply_text(_menu_text(uid, update.effective_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(uid))
+    await msg.reply_text(_menu_text(uid, update.effective_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
+
 
 async def cmd_mafia_start(update, ctx):
     if not _check_thread(update): return
@@ -567,10 +541,12 @@ async def cmd_mafia_start(update, ctx):
     if not await _is_chat_admin(ctx.bot, msg.chat.id, msg.from_user.id):
         return await msg.reply_text("⛔ Только администратор чата может запустить игру.")
     
-    if msg.chat.id in GAMES: return await msg.reply_text("⚠️ Игра уже идёт.")
+    if msg.chat.id in GAMES: 
+        return await msg.reply_text("⚠️ Игра уже идёт.")
+        
     buttons = [InlineKeyboardButton(str(i), callback_data=f"ms:{i}") for i in range(5, 21)]
     rows = [buttons[i:i + 5] for i in range(0, len(buttons), 5)]
-    await msg.reply_text("🍁 *Кленовая мафия*\nВыбери количество:", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
+    await msg.reply_text("🍁 <b>Кленовая мафия</b>\nВыбери количество:", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
 
 async def cmd_mafia_stop(update, ctx):
     if not _check_thread(update): return
@@ -585,18 +561,16 @@ async def cmd_crocodile(update, ctx):
     if not _check_thread(update): return
     msg = update.effective_message
     if not msg or msg.chat.type == "private": return
-    
     if not await _is_chat_admin(ctx.bot, msg.chat.id, msg.from_user.id):
         return await msg.reply_text("⛔ Только администратор чата может запустить Крокодила.")
         
     CROC_ACTIVE.add(msg.chat.id)
-    await msg.reply_text("🐊 *Крокодил*\nНажми кнопку, чтобы загадать слово.", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]]))
+    await msg.reply_text("🐊 <b>Крокодил</b>\nНажми кнопку, чтобы загадать слово.", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]]))
 
 async def cmd_crocodile_stop(update, ctx):
     if not _check_thread(update): return
     msg = update.effective_message
     if not msg or msg.chat.type == "private": return
-    
     if not await _is_chat_admin(ctx.bot, msg.chat.id, msg.from_user.id):
         return await msg.reply_text("⛔ Только администратор чата может остановить игру.")
         
@@ -611,20 +585,23 @@ async def cmd_crocodile_stop(update, ctx):
     for uid in to_remove:
         del CROC_AWAITING[uid]
 
+
 async def cb_start_count(update, ctx):
     q = update.callback_query
     if q is None or not _check_thread(update): return await q.answer("Не та ветка", show_alert=True)
     if q.message.chat.id in GAMES: return await q.answer("Игра уже идёт", show_alert=True)
+    
     count = int(q.data.split(":")[1])
     game = Game(chat_id=q.message.chat.id, thread_id=q.message.message_thread_id or 0, total=count)
     game.join_message_id = q.message.message_id
     GAMES[game.chat_id] = game
+    
     kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"🎮 Играть (0/{count})", callback_data="mj")], [InlineKeyboardButton("❌ Отменить", callback_data="mc")]])
-    await q.edit_message_text(f"🍁 *Набор*\nНужно: *{count}*\nНабрано: *0/{count}*\n\n❗ Каждому нажать /start в ЛС бота.", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    await q.edit_message_text(f"🍁 <b>Набор</b>\nНужно: <b>{count}</b>\nНабрано: <b>0/{count}</b>\n\n❗ Каждому нажать /start в ЛС бота.", parse_mode=ParseMode.HTML, reply_markup=kb)
     game.task = asyncio.create_task(_join_timeout(ctx.bot, game.chat_id))
 
 async def _join_timeout(bot, chat_id):
-    await asyncio.sleep(JOIN_TIMEOUT_SEC)
+    await asyncio.sleep(300)
     game = GAMES.get(chat_id)
     if game and game.phase == "joining":
         GAMES.pop(chat_id, None)
@@ -633,14 +610,17 @@ async def _join_timeout(bot, chat_id):
 async def cb_join(update, ctx):
     q = update.callback_query
     if q is None or not _check_thread(update): return await q.answer("Не та ветка", show_alert=True)
+    
     chat = update.effective_chat
     user = q.from_user
     game = GAMES.get(chat.id)
     if not game or game.phase != "joining": return await q.answer("Набор закрыт", show_alert=True)
     if user.id in game.players: return await q.answer("Ты уже в игре")
     
-    try: await ctx.bot.send_message(user.id, "🍁 Ты в игре!")
-    except: return await q.answer("Сначала нажми /start в ЛС!", show_alert=True)
+    try: 
+        await ctx.bot.send_message(user.id, "🍁 Ты в игре!")
+    except Exception: 
+        return await q.answer("Сначала нажми /start в ЛС!", show_alert=True)
     
     u = db_get_user(user.id, user)
     p = Player(user_id=user.id, username=user.username or "", full_name=user.full_name)
@@ -652,35 +632,35 @@ async def cb_join(update, ctx):
     if n >= game.total:
         if game.task and not game.task.done(): game.task.cancel()
         await q.answer("Поехали!")
-        await ctx.bot.edit_message_text(chat_id=chat.id, message_id=game.join_message_id, text=f"🍁 *Набор окончен*\nИгроков: *{n}/{game.total}*", parse_mode=ParseMode.MARKDOWN)
+        await ctx.bot.edit_message_text(chat_id=chat.id, message_id=game.join_message_id, text=f"🍁 <b>Набор окончен</b>\nИгроков: <b>{n}/{game.total}</b>", parse_mode=ParseMode.HTML)
         await _start_game(ctx.bot, game)
         return
+        
     names = ", ".join([get_safe_name(p) for p in game.players.values()])
     kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"🎮 Играть ({n}/{game.total})", callback_data="mj")], [InlineKeyboardButton("❌ Отменить", callback_data="mc")]])
     try:
-        await ctx.bot.edit_message_text(chat_id=chat.id, message_id=game.join_message_id, text=f"🍁 *Набор*\nНужно: *{game.total}*\nНабрано: *{n}/{game.total}*\n\n👥 {names}", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-    except: pass
+        await ctx.bot.edit_message_text(chat_id=chat.id, message_id=game.join_message_id, text=f"🍁 <b>Набор</b>\nНужно: <b>{game.total}</b>\nНабрано: <b>{n}/{game.total}</b>\n\n👥 {names}", parse_mode=ParseMode.HTML, reply_markup=kb)
+    except Exception: 
+        pass
     await q.answer(f"В игре ({n}/{game.total})")
 
 async def cb_cancel(update, ctx):
     q = update.callback_query
     if q is None: return
     chat = update.effective_chat
-    user = q.from_user
-    if not await _is_chat_admin(ctx.bot, chat.id, user.id):
-        await q.answer("Только администратор", show_alert=True)
-        return
+    if not await _is_chat_admin(ctx.bot, chat.id, q.from_user.id):
+        return await q.answer("Только администратор", show_alert=True)
+        
     game = GAMES.pop(chat.id, None)
-    if game is None:
-        await q.answer()
-        return
-    if game.task and not game.task.done(): game.task.cancel()
+    if game is None: return await q.answer()
     
+    if game.task and not game.task.done(): game.task.cancel()
     await q.answer("Отменено")
     try:
         await q.edit_message_text("🍁 Игра отменена.")
-    except:
+    except Exception:
         await _send_to_chat(ctx.bot, game, "🍁 Игра отменена.")
+
 
 async def _start_game(bot, game):
     roles = get_roles(game.total)[:]
@@ -689,16 +669,19 @@ async def _start_game(bot, game):
     random.shuffle(uids)
     for uid, role in zip(uids, roles):
         game.players[uid].role = role
+        
     mafia_names = [get_safe_name(p) for p in game.all_mafia()]
-    
     for p in game.players.values():
         teammates = [n for n in mafia_names if n != get_safe_name(p)]
-        text = f"🍁 Твоя роль: *{ROLE_NAMES[p.role]}*\n\n{ROLE_DESCRIPTIONS[p.role]}"
-        if p.role == "mafia" and teammates: text += f"\n\n🤝 Союзники: {', '.join(teammates)}"
-        try: await bot.send_message(p.user_id, text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🍁 Меню", callback_data="openmenu:0")]]))
-        except: pass
+        text = f"🍁 Твоя роль: <b>{ROLE_NAMES[p.role]}</b>\n\n{ROLE_DESCRIPTIONS[p.role]}"
+        if p.role == "mafia" and teammates: 
+            text += f"\n\n🤝 Союзники: {', '.join(teammates)}"
+        try: 
+            await bot.send_message(p.user_id, text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🍁 Меню", callback_data="openmenu:0")]]))
+        except Exception: 
+            pass
 
-    await _send_to_chat(bot, game, f"🍁 *Игра началась!*\nИгроков: *{game.total}*\nТеней: *{len(game.all_mafia())}*", parse_mode=ParseMode.MARKDOWN)
+    await _send_to_chat(bot, game, f"🍁 <b>Игра началась!</b>\nИгроков: <b>{game.total}</b>\nТеней: <b>{len(game.all_mafia())}</b>", parse_mode=ParseMode.HTML)
     game.task = asyncio.create_task(_game_loop(bot, game))
 
 async def _game_loop(bot, game):
@@ -724,7 +707,7 @@ async def _game_loop(bot, game):
 async def _run_night(bot, game):
     game.phase = "night"
     game.night_actions.clear()
-    await _send_to_chat(bot, game, f"🌙 *Ночь {game.round_num}*\nКленовый город засыпает…", parse_mode=ParseMode.MARKDOWN)
+    await _send_to_chat(bot, game, f"🌙 <b>Ночь {game.round_num}</b>\nКленовый город засыпает…", parse_mode=ParseMode.HTML)
     await asyncio.sleep(2)
     
     for p in game.alive_players():
@@ -733,12 +716,15 @@ async def _run_night(bot, game):
         if p.role == "mafia": targets = [op for op in game.alive_players() if ROLE_TEAM[op.role] != "mafia"]
         elif p.role == "doctor": targets = game.alive_players()
         elif p.role == "medium": targets = [op for op in game.players.values() if not op.alive]
+        
         if not targets: continue
         rows = [[InlineKeyboardButton(get_safe_name(t), callback_data=f"mn:{game.chat_id}:{t.user_id}")] for t in targets]
-        try: await bot.send_message(p.user_id, f"🌙 *Ночь*\nВыбери цель:", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
-        except: pass
+        try: 
+            await bot.send_message(p.user_id, f"🌙 <b>Ночь</b>\nВыбери цель:", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
+        except Exception: 
+            pass
     
-    await asyncio.sleep(NIGHT_ACTION_TIMEOUT)
+    await asyncio.sleep(60)
     await _resolve_night(bot, game)
 
 async def _resolve_night(bot, game):
@@ -758,13 +744,17 @@ async def _resolve_night(bot, game):
     for tid, src in [(bart_t, "Укрыватель"), (whore_t, "Очаровательница")]:
         if tid and tid in game.players:
             t = game.players[tid]
-            if t.alive: t.muted_until = time.time() + MUTE_DURATION_SEC; msg.append(f"🔇 {get_safe_name(t)} замолчал.")
+            if t.alive: 
+                t.muted_until = time.time() + 300
+                msg.append(f"🔇 {get_safe_name(t)} замолчал.")
             
     if cop_t:
         c = next((p for p in game.alive_players() if p.role == "cop"), None)
         t = game.players[cop_t]
         is_m = ROLE_TEAM[t.role] == "mafia"
-        if t.has_active("fake"): is_m = False; t.consume_active("fake")
+        if t.has_active("fake"): 
+            is_m = False
+            t.consume_active("fake")
         if c: await _safe_send(bot, c.user_id, f"🔍 {get_safe_name(t)} — {'ТЕНЬ' if is_m else 'Житель'}")
         
     if med_t:
@@ -775,37 +765,33 @@ async def _resolve_night(bot, game):
     if m_votes:
         c = Counter(m_votes).most_common()
         if c[0][1] > 1 or len(c) == 1:
-            k = c[0][0]; v = game.players[k]
-            if v.has_active("amulet"): v.consume_active("amulet"); msg.append(f"🛡 Оберег спас {get_safe_name(v)}!")
-            elif k == doc_t: msg.append(f"💉 Лекарь спас {get_safe_name(v)}!")
-            else: v.alive = False; msg.append(f"💀 Убит: {get_safe_name(v)}")
-        else: msg.append("Тени не договорились.")
+            k = c[0][0]
+            v = game.players[k]
+            if v.has_active("amulet"): 
+                v.consume_active("amulet")
+                msg.append(f"🛡 Оберег спас {get_safe_name(v)}!")
+            elif k == doc_t: 
+                msg.append(f"💉 Лекарь спас {get_safe_name(v)}!")
+            else: 
+                v.alive = False
+                msg.append(f"💀 Убит: {get_safe_name(v)}")
+        else: 
+            msg.append("Тени не договорились.")
         
     if not msg: msg.append("Спокойная ночь.")
-    await _send_to_chat(bot, game, "🌅 *Итоги ночи:*\n" + "\n".join(msg), parse_mode=ParseMode.MARKDOWN)
+    await _send_to_chat(bot, game, "🌅 <b>Итоги ночи:</b>\n" + "\n".join(msg), parse_mode=ParseMode.HTML)
 
 async def _run_day(bot, game):
     game.phase = "day"
-    alive_list = [get_safe_name(p) for p in game.alive_players()]
-    alive_str = ", ".join(alive_list)
+    alive_str = ", ".join([get_safe_name(p) for p in game.alive_players()])
     
     total = game.total
-    if total <= 6:
-        discuss_sec = 60
-    elif total <= 9:
-        discuss_sec = 90
-    elif total <= 13:
-        discuss_sec = 120
-    elif total <= 17:
-        discuss_sec = 150
-    else:
-        discuss_sec = 180
-        
+    discuss_sec = 60 if total <= 6 else 90 if total <= 9 else 120 if total <= 13 else 150 if total <= 17 else 180
     m = discuss_sec // 60
     s = discuss_sec % 60
     time_str = f"{m} мин" if s == 0 else f"{m} мин {s} сек"
     
-    await _send_to_chat(bot, game, f"☀️ *День {game.round_num}*\nЖивы: {alive_str}\nОбсуждение — {time_str}.", parse_mode=ParseMode.MARKDOWN)
+    await _send_to_chat(bot, game, f"☀️ <b>День {game.round_num}</b>\nЖивы: {alive_str}\nОбсуждение — {time_str}.", parse_mode=ParseMode.HTML)
     await asyncio.sleep(discuss_sec)
 
 async def _run_vote(bot, game):
@@ -813,14 +799,17 @@ async def _run_vote(bot, game):
     game.votes.clear()
     alive = game.alive_players()
     if len(alive) <= 1: return
+    
     rows = [[InlineKeyboardButton(get_safe_name(p), callback_data=f"mv:{game.chat_id}:{p.user_id}")] for p in alive]
-    await _send_to_chat(bot, game, f"🗳 *Голосование* 1 мин.", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
-    await asyncio.sleep(VOTE_DURATION_SEC)
+    await _send_to_chat(bot, game, f"🗳 <b>Голосование</b> 1 мин.", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
+    await asyncio.sleep(60)
     
     valid = {}
     for v_id, t_id in game.votes.items():
         t = game.players.get(t_id)
-        if t and t.has_active("blind"): t.consume_active("blind"); continue
+        if t and t.has_active("blind"): 
+            t.consume_active("blind")
+            continue
         valid[v_id] = t_id
         
     if not valid: return await _send_to_chat(bot, game, "Никто не голосовал.")
@@ -829,12 +818,18 @@ async def _run_vote(bot, game):
         p = game.players[c[0][0]]
         p.alive = False
         await _send_to_chat(bot, game, f"⚖️ Изгнан: {get_safe_name(p)} (<b>{ROLE_NAMES[p.role]}</b>)", parse_mode=ParseMode.HTML)
-    else: await _send_to_chat(bot, game, "⚖️ Ничья.")
+    else: 
+        await _send_to_chat(bot, game, "⚖️ Ничья.")
 
 def _check_win(game):
-    m = len(game.alive_mafia()); c = len(game.alive_city())
-    if m == 0: game.winner = "city"; return True
-    if m >= c: game.winner = "mafia"; return True
+    m = len(game.alive_mafia())
+    c = len(game.alive_city())
+    if m == 0: 
+        game.winner = "city"
+        return True
+    if m >= c: 
+        game.winner = "mafia"
+        return True
     return False
 
 async def _announce_end(bot, game):
@@ -848,12 +843,7 @@ async def _announce_end(bot, game):
         lines.append(f"• {get_safe_name(p)} — <b>{ROLE_NAMES[p.role]}</b>{mark} — {status}")
         
         u = db_get_user(p.user_id)
-        
-        old_wins = u['wins']
-        old_games = u['games']
-        old_croc = u['croc_wins']
-        old_lvl = (old_wins * 2 + old_games + old_croc) // 5 + 1
-
+        old_lvl = (u['wins'] * 2 + u['games'] + u['croc_wins']) // 5 + 1
         u['games'] += 1
         reward = 1
         
@@ -880,29 +870,29 @@ async def _announce_end(bot, game):
         
         if u['coins'] >= 100 and "rich_100" not in u['achievements']: u['achievements'].append("rich_100")
         if u['coins'] >= 1000 and "rich_1000" not in u['achievements']: u['achievements'].append("rich_1000")
-        
         if u['games'] >= 10 and "games_10" not in u['achievements']: u['achievements'].append("games_10")
         if u['games'] >= 50 and "games_50" not in u['achievements']: u['achievements'].append("games_50")
         if u['games'] >= 100 and "games_100" not in u['achievements']: u['achievements'].append("games_100")
-        
         if u['wins'] >= 5 and "wins_5" not in u['achievements']: u['achievements'].append("wins_5")
         if u['wins'] >= 20 and "wins_20" not in u['achievements']: u['achievements'].append("wins_20")
         if u['wins'] >= 50 and "wins_50" not in u['achievements']: u['achievements'].append("wins_50")
-        
         if new_lvl >= 5 and "level_5" not in u['achievements']: u['achievements'].append("level_5")
         if new_lvl >= 10 and "level_10" not in u['achievements']: u['achievements'].append("level_10")
         if new_lvl >= 20 and "level_20" not in u['achievements']: u['achievements'].append("level_20")
         
         db_save_user(p.user_id, **u)
         
-        msg_text = f"🍁 *Игра окончена!*\nТы {'выиграл' if won else 'проиграл'}.\nНаграда: *+{reward}🍁*\nОпыт: *+{xp_gained} XP*"
+        msg_text = f"🍁 <b>Игра окончена!</b>\nТы {'выиграл' if won else 'проиграл'}.\nНаграда: <b>+{reward}🍁</b>\nОпыт: <b>+{xp_gained} XP</b>"
         if new_lvl > old_lvl:
-            msg_text += f"\n⭐ *Уровень повышен до {new_lvl}!*"
+            msg_text += f"\n⭐ <b>Уровень повышен до {new_lvl}!</b>"
 
-        try: await _safe_send(bot, p.user_id, msg_text, parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(p.user_id, game.chat_id))
-        except: pass
+        try: 
+            await _safe_send(bot, p.user_id, msg_text, parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(p.user_id, game.chat_id))
+        except Exception: 
+            pass
 
     await _send_to_chat(bot, game, "\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🍁 Меню", callback_data=f"openmenu:{game.chat_id}")]]))
+
 
 async def cb_night_action(update, ctx):
     q = update.callback_query
@@ -912,12 +902,15 @@ async def cb_night_action(update, ctx):
     game = GAMES.get(chat_id)
     if not game or game.phase != "night": return await q.answer("Не ночь", show_alert=True)
     if q.from_user.id in game.night_actions: return await q.answer("Ты уже ходил", show_alert=True)
+    
     target = game.players.get(target_id)
     if not target: return await q.answer("Нет цели")
     game.night_actions[q.from_user.id] = target_id
     await q.answer(f"Выбран: {get_safe_name(target)}")
-    try: await q.edit_message_text(f"🌙 Выбран: {get_safe_name(target)}", parse_mode=ParseMode.HTML)
-    except: pass
+    try: 
+        await q.edit_message_text(f"🌙 Выбран: {get_safe_name(target)}", parse_mode=ParseMode.HTML)
+    except Exception: 
+        pass
 
 async def cb_vote(update, ctx):
     q = update.callback_query
@@ -925,66 +918,77 @@ async def cb_vote(update, ctx):
     parts = q.data.split(":")
     chat_id, target_id = int(parts[1]), int(parts[2])
     game = GAMES.get(chat_id)
+    
     if not game or game.phase != "voting": return await q.answer("Не голосование", show_alert=True)
     p = game.players.get(q.from_user.id)
     if not p or not p.alive or p.is_muted() or q.from_user.id in game.votes: return await q.answer("Нельзя", show_alert=True)
+    
     target = game.players.get(target_id)
     if not target or not target.alive: return await q.answer("Цель недоступна", show_alert=True)
+    
     game.votes[q.from_user.id] = target_id
     await q.answer("Голос принят!")
     await _send_to_chat(ctx.bot, game, f"🗳 <b>{get_safe_name(p)}</b> голосует против <b>{get_safe_name(target)}</b>", parse_mode=ParseMode.HTML)
 
+
 async def cb_open_menu(update, ctx):
     q = update.callback_query
     if not q: return
-    try: chat_id = int(q.data.split(":")[1])
-    except: chat_id = 0
-    await ctx.bot.send_message(q.from_user.id, _menu_text(q.from_user.id, q.from_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(q.from_user.id, chat_id))
+    try: 
+        chat_id = int(q.data.split(":")[1])
+    except Exception: 
+        chat_id = 0
+    await ctx.bot.send_message(q.from_user.id, _menu_text(q.from_user.id, q.from_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(q.from_user.id, chat_id))
     await q.answer()
 
 async def cb_menu_main(update, ctx):
     q = update.callback_query
     if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except: chat_id = 0
-    await q.edit_message_text(_menu_text(q.from_user.id, q.from_user), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(q.from_user.id, chat_id))
+    try: 
+        chat_id = int(q.data.split(":")[2])
+    except Exception: 
+        chat_id = 0
+    await q.edit_message_text(_menu_text(q.from_user.id, q.from_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(q.from_user.id, chat_id))
     await q.answer()
 
 async def cb_menu_profile(update, ctx):
     q = update.callback_query
     if not q: return
-    uid = q.from_user.id
-    u = db_get_user(uid, q.from_user)
-    try: chat_id = int(q.data.split(":")[2])
-    except: chat_id = 0
+    u = db_get_user(q.from_user.id, q.from_user)
+    try: 
+        chat_id = int(q.data.split(":")[2])
+    except Exception: 
+        chat_id = 0
     
     total_xp = u['wins'] * 2 + u['games'] + u['croc_wins']
-    xp_to_next = (u['level'] * 5) - total_xp
-    
-    text = f"👤 *Профиль*\n\n🍁 Листики: *{u['coins']}*\n⭐ Уровень: *{u['level']}* (XP: {total_xp}/{u['level']*5})\n👑 Титул: *{u['title']}*\n🏆 Побед: *{u['wins']}* / Игр: *{u['games']}*\n\n🎒 Инвентарь: `{len(u['inventory'])}` предм.\n🏅 Достижений: `{len(u['achievements'])}`"
-    await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
+    text = f"👤 <b>Профиль</b>\n\n🍁 Листики: <b>{u['coins']}</b>\n⭐ Уровень: <b>{u['level']}</b> (XP: {total_xp}/{u['level']*5})\n👑 Титул: <b>{u['title']}</b>\n🏆 Побед: <b>{u['wins']}</b> / Игр: <b>{u['games']}</b>\n\n🎒 Инвентарь: <code>{len(u['inventory'])}</code> предм.\n🏅 Достижений: <code>{len(u['achievements'])}</code>"
+    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
     await q.answer()
 
 async def cb_menu_ach(update, ctx):
     q = update.callback_query
     if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except: chat_id = 0
+    try: 
+        chat_id = int(q.data.split(":")[2])
+    except Exception: 
+        chat_id = 0
     u = db_get_user(q.from_user.id, q.from_user)
-    lines = ["🏅 *Достижения*", ""]
+    lines = ["🏅 <b>Достижения</b>", ""]
     for k, v in ALL_ACHIEVEMENTS.items():
         lines.append(("✅ " if k in u['achievements'] else "❌ ") + v)
-    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
+    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
     await q.answer()
 
 async def cb_menu_titles(update, ctx):
     q = update.callback_query
     if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except: chat_id = 0
+    try: 
+        chat_id = int(q.data.split(":")[2])
+    except Exception: 
+        chat_id = 0
     u = db_get_user(q.from_user.id, q.from_user)
     
-    text = f"👑 *Титулы*\n\nТекущий: *{u['title']}*\nТвои достижения: `{len(u['achievements'])}`\n\n"
+    text = f"👑 <b>Титулы</b>\n\nТекущий: <b>{u['title']}</b>\nТвои достижения: <code>{len(u['achievements'])}</code>\n\n"
     rows = []
     
     for tid, tdata in TITLES_SHOP.items():
@@ -994,17 +998,14 @@ async def cb_menu_titles(update, ctx):
         elif tdata['name'] in u['unlocked_titles']:
             status = " (Доступен)"
         elif tdata['ach_req'] > 0:
-            if len(u['achievements']) >= tdata['ach_req']:
-                status = f" (За {tdata['ach_req']} ачивок)"
-            else:
-                status = f" (Нужно {tdata['ach_req']} ачивок)"
+            status = f" (За {tdata['ach_req']} ачивок)" if len(u['achievements']) >= tdata['ach_req'] else f" (Нужно {tdata['ach_req']} ачивок)"
         else:
             status = f" — {tdata['price']}🍁"
         
         rows.append([InlineKeyboardButton(f"{tdata['emoji']} {tdata['name']}{status} (+{tdata['daily_bonus']}🍁)", callback_data=f"title:set:{chat_id}:{tid}")])
     
     rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")])
-    await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
+    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
     await q.answer()
 
 async def cb_title_set(update, ctx):
@@ -1039,14 +1040,16 @@ async def cb_title_set(update, ctx):
 async def cb_menu_shop(update, ctx):
     q = update.callback_query
     if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except: chat_id = 0
+    try: 
+        chat_id = int(q.data.split(":")[2])
+    except Exception: 
+        chat_id = 0
     u = db_get_user(q.from_user.id, q.from_user)
     rows = []
     for iid, item in SHOP_ITEMS.items():
         rows.append([InlineKeyboardButton(f"{item['emoji']} {item['name']} — {item['price']}🍁", callback_data=f"shop:item:{chat_id}:{iid}")])
     rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")])
-    await q.edit_message_text(f"🛒 *Магазин*\n\nБаланс: *{u['coins']}🍁*", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
+    await q.edit_message_text(f"🛒 <b>Магазин</b>\n\nБаланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
     await q.answer()
 
 async def cb_shop_item(update, ctx):
@@ -1056,8 +1059,9 @@ async def cb_shop_item(update, ctx):
     chat_id, iid = int(parts[2]), parts[3]
     item = SHOP_ITEMS.get(iid)
     if not item: return await q.answer("Нет предмета")
+    
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Купить", callback_data=f"shop:buy:{chat_id}:{iid}")], [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:shop:{chat_id}")]])
-    await q.edit_message_text(f"{item['emoji']} *{item['name']}*\n{item['desc']}\nЦена: *{item['price']}🍁*", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    await q.edit_message_text(f"{item['emoji']} <b>{item['name']}</b>\n{item['desc']}\nЦена: <b>{item['price']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 async def cb_shop_buy(update, ctx):
@@ -1067,19 +1071,25 @@ async def cb_shop_buy(update, ctx):
     chat_id, iid = int(parts[2]), parts[3]
     u = db_get_user(q.from_user.id, q.from_user)
     item = SHOP_ITEMS.get(iid)
+    
     if u['coins'] < item['price']: return await q.answer("Мало листиков!", show_alert=True)
     u['coins'] -= item['price']
     u['inventory'][iid] = u['inventory'].get(iid, 0) + 1
     db_save_user(q.from_user.id, **u)
+    
     await q.answer("Куплено!")
-    try: await q.edit_message_text(f"✅ Куплено: {item['name']}\nОстаток: {u['coins']}🍁", reply_markup=_menu_back_kb(chat_id))
-    except: pass
+    try: 
+        await q.edit_message_text(f"✅ Куплено: {item['name']}\nОстаток: {u['coins']}🍁", reply_markup=_menu_back_kb(chat_id))
+    except Exception: 
+        pass
 
 async def cb_menu_inv(update, ctx):
     q = update.callback_query
     if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except: chat_id = 0
+    try: 
+        chat_id = int(q.data.split(":")[2])
+    except Exception: 
+        chat_id = 0
     u = db_get_user(q.from_user.id, q.from_user)
     rows = []
     for iid, cnt in u['inventory'].items():
@@ -1087,7 +1097,7 @@ async def cb_menu_inv(update, ctx):
             rows.append([InlineKeyboardButton(f"{SHOP_ITEMS[iid]['emoji']} {SHOP_ITEMS[iid]['name']} x{cnt}", callback_data=f"inv:item:{chat_id}:{iid}")])
     if not rows: rows.append([InlineKeyboardButton("— пусто —", callback_data="noop")])
     rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")])
-    await q.edit_message_text("🎒 *Инвентарь*", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
+    await q.edit_message_text("🎒 <b>Инвентарь</b>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
     await q.answer()
 
 async def cb_inv_item(update, ctx):
@@ -1096,12 +1106,13 @@ async def cb_inv_item(update, ctx):
     parts = q.data.split(":")
     chat_id, iid = int(parts[2]), parts[3]
     item = SHOP_ITEMS.get(iid)
+    
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("⚡ Сейчас", callback_data=f"inv:use:{chat_id}:{iid}:now")],
         [InlineKeyboardButton("🎯 На матч", callback_data=f"inv:use:{chat_id}:{iid}:match")],
         [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:inv:{chat_id}")]
     ])
-    await q.edit_message_text(f"{item['emoji']} *{item['name']}*\n\nИспользовать?", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    await q.edit_message_text(f"{item['emoji']} <b>{item['name']}</b>\n\nИспользовать?", parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 async def cb_inv_use(update, ctx):
@@ -1110,6 +1121,7 @@ async def cb_inv_use(update, ctx):
     parts = q.data.split(":")
     chat_id, iid, mode = int(parts[2]), parts[3], parts[4]
     u = db_get_user(q.from_user.id, q.from_user)
+    
     if u['inventory'].get(iid, 0) <= 0: return await q.answer("Нет предмета")
     u['inventory'][iid] -= 1
     if u['inventory'][iid] == 0: del u['inventory'][iid]
@@ -1123,8 +1135,10 @@ async def cb_inv_use(update, ctx):
                 await _safe_send(ctx.bot, q.from_user.id, f"🍪 Предсказание: {get_safe_name(t)} — {ROLE_NAMES[t.role]}")
         db_save_user(q.from_user.id, **u)
         await q.answer("Готово")
-        try: await q.edit_message_text("🍪 Предсказание отправлено.", reply_markup=_menu_back_kb(chat_id))
-        except: pass
+        try: 
+            await q.edit_message_text("🍪 Предсказание отправлено.", reply_markup=_menu_back_kb(chat_id))
+        except Exception: 
+            pass
         return
         
     db_save_user(q.from_user.id, **u)
@@ -1134,15 +1148,20 @@ async def cb_inv_use(update, ctx):
         game.players[q.from_user.id].active_items[iid] = mode
         
     await q.answer("Активировано!")
-    try: await q.edit_message_text(f"✅ Активировано: {SHOP_ITEMS[iid]['name']} ({mode})", reply_markup=_menu_back_kb(chat_id))
-    except: pass
+    try: 
+        await q.edit_message_text(f"✅ Активировано: {SHOP_ITEMS[iid]['name']} ({mode})", reply_markup=_menu_back_kb(chat_id))
+    except Exception: 
+        pass
 
 async def cb_menu_bonus(update, ctx):
     q = update.callback_query
     if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except: chat_id = 0
+    try: 
+        chat_id = int(q.data.split(":")[2])
+    except Exception: 
+        chat_id = 0
     u = db_get_user(q.from_user.id, q.from_user)
+    
     if time.time() - u['last_bonus'] < 86400: return await q.answer("Бонус раз в сутки!", show_alert=True)
     
     bonus_amount = 5
@@ -1154,14 +1173,17 @@ async def cb_menu_bonus(update, ctx):
     u['coins'] += bonus_amount
     u['last_bonus'] = time.time()
     db_save_user(q.from_user.id, **u)
+    
     await q.answer(f"+{bonus_amount}🍁")
-    await q.edit_message_text(f"🍁 *Бонус* +{bonus_amount}🍁\nБаланс: {u['coins']}", parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
+    await q.edit_message_text(f"🍁 <b>Бонус</b> +{bonus_amount}🍁\nБаланс: {u['coins']}", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
 
 async def cb_menu_top(update, ctx):
     q = update.callback_query
     if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except: chat_id = 0
+    try: 
+        chat_id = int(q.data.split(":")[2])
+    except Exception: 
+        chat_id = 0
     
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
@@ -1172,10 +1194,7 @@ async def cb_menu_top(update, ctx):
     if rows_coins:
         for i, r in enumerate(rows_coins, 1):
             uname = r['username']
-            if uname:
-                link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>'
-            else:
-                link = f'👤 Игрок {r["user_id"]}'
+            link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
             lines.append(f"{i}. {link} — {r['coins']}🍁")
     else:
         lines.append("Пока пусто.")
@@ -1185,10 +1204,7 @@ async def cb_menu_top(update, ctx):
     if rows_level:
         for i, r in enumerate(rows_level, 1):
             uname = r['username']
-            if uname:
-                link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>'
-            else:
-                link = f'👤 Игрок {r["user_id"]}'
+            link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
             lines.append(f"{i}. {link} — {r['level']} lvl")
     else:
         lines.append("Пока пусто.")
@@ -1199,17 +1215,13 @@ async def cb_menu_top(update, ctx):
 async def cb_menu_buy(update, ctx):
     q = update.callback_query
     if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except: chat_id = 0
+    try: 
+        chat_id = int(q.data.split(":")[2])
+    except Exception: 
+        chat_id = 0
     
-    text = (
-        f"💎 *Покупка листиков*\n\n"
-        f"Актуальный курс: *1 листик = 3 рубля*\n\n"
-        f"Для покупки напишите нашему менеджеру: {SELLER_USERNAME}\n"
-        f"После перевода он выдаст вам листики.\n\n"
-        f"_(Обязательно укажите ваш ID: `{q.from_user.id}`)_"
-    )
-    await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
+    text = f"💎 <b>Покупка листиков</b>\n\nАктуальный курс: <b>1 листик = 3 рубля</b>\n\nДля покупки напишите нашему менеджеру: {SELLER_USERNAME}\nПосле перевода он выдаст вам листики.\n\n<i>(Обязательно укажите ваш ID: <code>{q.from_user.id}</code>)</i>"
+    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
     await q.answer()
 
 async def cb_menu_casino(update, ctx):
@@ -1217,22 +1229,17 @@ async def cb_menu_casino(update, ctx):
     if not q: return
     u = db_get_user(q.from_user.id, q.from_user)
     chance = db_get_setting("casino_chance", "45")
-    
     CASINO_AWAITING.add(q.from_user.id)
     
-    text = (
-        f"🎰 *Казино*\n\n"
-        f"Твой баланс: *{u['coins']}🍁*\n"
-        f"Шанс победы: *{chance}%*\n"
-        f"Выплата при победе: *x2*\n\n"
-        f"Введи сумму ставки (целое число от 1🍁):"
-    )
-    await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(0))
+    text = f"🎰 <b>Казино</b>\n\nТвой баланс: <b>{u['coins']}🍁</b>\nШанс победы: <b>{chance}%</b>\nВыплата при победе: <b>x2</b>\n\nВведи сумму ставки (целое число от 1🍁):"
+    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
     await q.answer()
+
 
 async def cb_admin_main(update, ctx):
     q = update.callback_query
     if q.from_user.id != ADMIN_ID: return await q.answer("Нет доступа", show_alert=True)
+    
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🍁 Выдать листики", callback_data="admin:act:give_coins")],
         [InlineKeyboardButton("⭐ Выдать уровень", callback_data="admin:act:give_level")],
@@ -1241,7 +1248,7 @@ async def cb_admin_main(update, ctx):
         [InlineKeyboardButton("👥 Список юзеров", callback_data="admin:users")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu:main:0")]
     ])
-    await q.edit_message_text("🛠 *Админ-панель*", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    await q.edit_message_text("🛠 <b>Админ-панель</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 async def cb_admin_act(update, ctx):
@@ -1249,11 +1256,11 @@ async def cb_admin_act(update, ctx):
     act = q.data.split(":")[2]
     ADMIN_STATE[q.from_user.id] = act
     prompts = {
-        "give_coins": "Отправь: `ID количество`",
-        "give_level": "Отправь: `ID уровень`",
-        "give_title": "Отправь: `ID Титул`"
+        "give_coins": "Отправь: <code>ID количество</code>",
+        "give_level": "Отправь: <code>ID уровень</code>",
+        "give_title": "Отправь: <code>ID Титул</code>"
     }
-    await q.edit_message_text(f"🛠 {prompts[act]}", parse_mode=ParseMode.MARKDOWN)
+    await q.edit_message_text(f"🛠 {prompts[act]}", parse_mode=ParseMode.HTML)
     await q.answer()
 
 async def cb_admin_casino(update, ctx):
@@ -1263,7 +1270,7 @@ async def cb_admin_casino(update, ctx):
         [InlineKeyboardButton("✏️ Изменить шанс", callback_data="admin:casino_set")],
         [InlineKeyboardButton("◀️ Назад", callback_data="admin:main")]
     ])
-    await q.edit_message_text(f"🎰 *Настройки Казино*\n\nТекущий шанс победы: *{chance}%*", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    await q.edit_message_text(f"🎰 <b>Настройки Казино</b>\n\nТекущий шанс победы: <b>{chance}%</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 async def cb_admin_casino_set(update, ctx):
@@ -1284,6 +1291,7 @@ async def cb_admin_users(update, ctx):
     await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
     await q.answer()
 
+
 async def cb_croc_new(update, ctx):
     q = update.callback_query
     if q.message.chat.id not in CROC_ACTIVE:
@@ -1293,26 +1301,27 @@ async def cb_croc_new(update, ctx):
         
     CROC_AWAITING[q.from_user.id] = q.message.chat.id
     await q.answer("Напиши мне в ЛС слово и описание!", show_alert=True)
-    try: await ctx.bot.send_message(q.from_user.id, "🐊 Отправь: `Слово | Описание`", parse_mode=ParseMode.MARKDOWN)
-    except: pass
+    try: 
+        await ctx.bot.send_message(q.from_user.id, "🐊 Отправь: <code>Слово | Описание</code>", parse_mode=ParseMode.HTML)
+    except Exception: 
+        pass
 
 async def croc_guess_mw(update, ctx):
     msg = update.effective_message
     if not msg or msg.chat.type == "private" or not _check_thread(update): return
+    
     game = CROC_GAME.get(msg.chat.id)
     if not game or not game.get("word") or not msg.text: return
     
     if msg.text.strip().lower() == game["word"].lower():
         CROC_GAME.pop(msg.chat.id, None)
-        try: await msg.set_reaction("✅")
-        except: pass
+        try: 
+            await msg.set_reaction("✅")
+        except Exception: 
+            pass
         
         u = db_get_user(msg.from_user.id, msg.from_user)
-        
-        old_wins = u['wins']
-        old_games = u['games']
-        old_croc = u['croc_wins']
-        old_lvl = (old_wins * 2 + old_games + old_croc) // 5 + 1
+        old_lvl = (u['wins'] * 2 + u['games'] + u['croc_wins']) // 5 + 1
         
         u['coins'] += 5
         u['croc_wins'] += 1
@@ -1332,20 +1341,24 @@ async def croc_guess_mw(update, ctx):
             
         try:
             await ctx.bot.send_message(msg.from_user.id, msg_text, parse_mode=ParseMode.HTML)
-        except: pass
+        except Exception: 
+            pass
         
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]])
         await msg.reply_text(f"🎉 <b>{get_safe_name(msg.from_user)}</b> угадал слово <b>{game['word']}</b>!\nНаграда: +5🍁\n\nЗагадай следующее:", parse_mode=ParseMode.HTML, reply_markup=kb)
         raise ApplicationHandlerStop
     else:
-        try: await msg.set_reaction("❌")
-        except: pass
+        try: 
+            await msg.set_reaction("❌")
+        except Exception: 
+            pass
 
 async def cb_noop(update, ctx):
     await update.callback_query.answer()
 
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.error("Exception while handling an update:", exc_info=context.error)
+
 
 def _build_app():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -1406,7 +1419,6 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_noop, pattern=r"^noop$"))
 
     app.add_error_handler(_error_handler)
-
     return app
 
 async def _run_bot():
