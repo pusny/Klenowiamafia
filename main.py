@@ -121,8 +121,8 @@ def db_get_user(user_id, tg_user=None):
             d['unlocked_titles'].append(d['title'])
         return d
 
-def db_save_user(user_id, **kwargs):
-    u = db_get_user(user_id)
+def db_save_user(uid, **kwargs):
+    u = db_get_user(uid)
     for k, v in kwargs.items():
         if k in u:
             u[k] = v
@@ -133,7 +133,7 @@ def db_save_user(user_id, **kwargs):
             WHERE user_id=?
         """, (
             u['username'], u['coins'], u['level'], u['title'], u['wins'], u['games'],
-            json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'], user_id
+            json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'], uid
         ))
         conn.commit()
 
@@ -1104,6 +1104,9 @@ async def croc_guess_mw(update, ctx):
 async def cb_noop(update, ctx):
     await update.callback_query.answer()
 
+async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.error("Exception while handling an update:", exc_info=context.error)
+
 def _build_app():
     app = Application.builder().token(BOT_TOKEN).build()
     g = filters.ChatType.GROUPS
@@ -1156,6 +1159,8 @@ def _build_app():
     
     app.add_handler(CallbackQueryHandler(cb_croc_new, pattern=r"^croc:new$"))
     app.add_handler(CallbackQueryHandler(cb_noop, pattern=r"^noop$"))
+
+    app.add_error_handler(_error_handler)
 
     return app
 
