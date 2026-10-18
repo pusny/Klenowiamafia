@@ -144,13 +144,16 @@ def db_get_user(user_id, tg_user=None):
         d['unlocked_titles'] = json.loads(d.get('unlocked_titles') or '["Новичок"]')
         
         d['coins'] = int(d.get('coins') or 0)
-        d['level'] = int(d.get('level') or 1)
         d['wins'] = int(d.get('wins') or 0)
         d['games'] = int(d.get('games') or 0)
         d['last_bonus'] = float(d.get('last_bonus') or 0.0)
         d['croc_wins'] = int(d.get('croc_wins') or 0)
         d['mafia_wins'] = int(d.get('mafia_wins') or 0)
         d['city_wins'] = int(d.get('city_wins') or 0)
+        
+        # Пересчитываем уровень на основе опыта
+        total_xp = d['wins'] * 2 + d['games'] + d['croc_wins']
+        d['level'] = total_xp // 5 + 1
         
         if d['title'] not in d['unlocked_titles']:
             d['unlocked_titles'].append(d['title'])
@@ -846,6 +849,12 @@ async def _announce_end(bot, game):
         lines.append(f"• {get_safe_name(p)} — <b>{ROLE_NAMES[p.role]}</b>{mark} — {status}")
         
         u = db_get_user(p.user_id)
+        
+        old_wins = u['wins']
+        old_games = u['games']
+        old_croc = u['croc_wins']
+        old_lvl = (old_wins * 2 + old_games + old_croc) // 5 + 1
+
         u['games'] += 1
         reward = 1
         
@@ -865,6 +874,11 @@ async def _announce_end(bot, game):
                 if u['city_wins'] >= 10 and "city_10" not in u['achievements']: u['achievements'].append("city_10")
             
         u['coins'] += reward
+        xp_gained = 3 if won else 1
+        
+        new_lvl = (u['wins'] * 2 + u['games'] + u['croc_wins']) // 5 + 1
+        u['level'] = new_lvl
+        
         if u['coins'] >= 100 and "rich_100" not in u['achievements']: u['achievements'].append("rich_100")
         if u['coins'] >= 1000 and "rich_1000" not in u['achievements']: u['achievements'].append("rich_1000")
         
@@ -876,14 +890,17 @@ async def _announce_end(bot, game):
         if u['wins'] >= 20 and "wins_20" not in u['achievements']: u['achievements'].append("wins_20")
         if u['wins'] >= 50 and "wins_50" not in u['achievements']: u['achievements'].append("wins_50")
         
-        u['level'] = (u['wins'] * 2 + u['games']) // 5 + 1
-        if u['level'] >= 5 and "level_5" not in u['achievements']: u['achievements'].append("level_5")
-        if u['level'] >= 10 and "level_10" not in u['achievements']: u['achievements'].append("level_10")
-        if u['level'] >= 20 and "level_20" not in u['achievements']: u['achievements'].append("level_20")
+        if new_lvl >= 5 and "level_5" not in u['achievements']: u['achievements'].append("level_5")
+        if new_lvl >= 10 and "level_10" not in u['achievements']: u['achievements'].append("level_10")
+        if new_lvl >= 20 and "level_20" not in u['achievements']: u['achievements'].append("level_20")
         
         db_save_user(p.user_id, **u)
         
-        try: await _safe_send(bot, p.user_id, f"🍁 *Игра окончена!*\nТы {'выиграл' if won else 'проиграл'}.\nНаграда: *+{reward}🍁*", parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(p.user_id, game.chat_id))
+        msg_text = f"🍁 *Игра окончена!*\nТы {'выиграл' if won else 'проиграл'}.\nНаграда: *+{reward}🍁*\nОпыт: *+{xp_gained} XP*"
+        if new_lvl > old_lvl:
+            msg_text += f"\n⭐ *Уровень повышен до {new_lvl}!*"
+
+        try: await _safe_send(bot, p.user_id, msg_text, parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_main_kb(p.user_id, game.chat_id))
         except: pass
 
     await _send_to_chat(bot, game, "\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🍁 Меню", callback_data=f"openmenu:{game.chat_id}")]]))
@@ -941,7 +958,11 @@ async def cb_menu_profile(update, ctx):
     u = db_get_user(uid, q.from_user)
     try: chat_id = int(q.data.split(":")[2])
     except: chat_id = 0
-    text = f"👤 *Профиль*\n\n🍁 Листики: *{u['coins']}*\n⭐ Уровень: *{u['level']}*\n👑 Титул: *{u['title']}*\n🏆 Побед: *{u['wins']}* / Игр: *{u['games']}*\n\n🎒 Инвентарь: `{len(u['inventory'])}` предм.\n🏅 Достижений: `{len(u['achievements'])}`"
+    
+    total_xp = u['wins'] * 2 + u['games'] + u['croc_wins']
+    xp_to_next = (u['level'] * 5) - total_xp
+    
+    text = f"👤 *Профиль*\n\n🍁 Листики: *{u['coins']}*\n⭐ Уровень: *{u['level']}* (XP: {total_xp}/{u['level']*5})\n👑 Титул: *{u['title']}*\n🏆 Побед: *{u['wins']}* / Игр: *{u['games']}*\n\n🎒 Инвентарь: `{len(u['inventory'])}` предм.\n🏅 Достижений: `{len(u['achievements'])}`"
     await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=_menu_back_kb(chat_id))
     await q.answer()
 
@@ -1279,8 +1300,17 @@ async def croc_guess_mw(update, ctx):
         except: pass
         
         u = db_get_user(msg.from_user.id, msg.from_user)
+        
+        old_wins = u['wins']
+        old_games = u['games']
+        old_croc = u['croc_wins']
+        old_lvl = (old_wins * 2 + old_games + old_croc) // 5 + 1
+        
         u['coins'] += 5
         u['croc_wins'] += 1
+        
+        new_lvl = (u['wins'] * 2 + u['games'] + u['croc_wins']) // 5 + 1
+        u['level'] = new_lvl
         
         if "croc_1" not in u['achievements']: u['achievements'].append("croc_1")
         if u['croc_wins'] >= 10 and "croc_10" not in u['achievements']: u['achievements'].append("croc_10")
@@ -1288,8 +1318,12 @@ async def croc_guess_mw(update, ctx):
         
         db_save_user(msg.from_user.id, **u)
         
+        msg_text = f"🐊 Ты угадал слово <b>{game['word']}</b>!\nНаграда: +5🍁\nОпыт: <b>+2 XP</b>"
+        if new_lvl > old_lvl:
+            msg_text += f"\n⭐ <b>Уровень повышен до {new_lvl}!</b>"
+            
         try:
-            await ctx.bot.send_message(msg.from_user.id, f"🐊 Ты угадал слово <b>{game['word']}</b>!\nНаграда: +5🍁", parse_mode=ParseMode.HTML)
+            await ctx.bot.send_message(msg.from_user.id, msg_text, parse_mode=ParseMode.HTML)
         except: pass
         
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]])
