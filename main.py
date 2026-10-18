@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions
 from telegram.constants import ParseMode
 from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import (
@@ -459,7 +459,6 @@ async def cmd_dm_other(update, ctx):
     uid = update.effective_user.id
     db_get_user(uid, update.effective_user)
     
-    # 1. Сначала проверяем админку
     if uid in ADMIN_STATE:
         action = ADMIN_STATE.pop(uid)
         parts = msg.text.split(maxsplit=2)
@@ -491,7 +490,6 @@ async def cmd_dm_other(update, ctx):
             await msg.reply_text("❌ Ошибка. Проверь формат ввода.", reply_markup=_menu_main_kb(uid))
         return
         
-    # 2. Потом крокодила
     if uid in CROC_AWAITING:
         chat_id = CROC_AWAITING.pop(uid)
         if "|" in msg.text:
@@ -506,7 +504,6 @@ async def cmd_dm_other(update, ctx):
             await msg.reply_text("❌ Ошибка. Пиши: <code>Слово | Описание</code>", parse_mode=ParseMode.HTML)
         return
 
-    # 3. Потом казино
     if uid in CASINO_AWAITING:
         try:
             bet = int(msg.text.strip())
@@ -1217,7 +1214,7 @@ async def cb_menu_top(update, ctx):
     else:
         lines.append("Пока пусто.")
         
-    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
+    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id), link_preview_options=LinkPreviewOptions(is_disabled=True))
     await q.answer()
 
 async def cb_menu_buy(update, ctx):
@@ -1240,9 +1237,8 @@ async def cb_menu_casino(update, ctx):
     CASINO_AWAITING.add(q.from_user.id)
     
     u = db_get_user(q.from_user.id, q.from_user)
-    chance = db_get_setting("casino_chance", "45")
     
-    text = f"🎰 <b>Казино</b>\n\nТвой баланс: <b>{u['coins']}🍁</b>\nШанс победы: <b>{chance}%</b>\nВыплата при победе: <b>x2</b>\n\nВведи сумму ставки (целое число от 1🍁):"
+    text = f"🎰 <b>Казино</b>\n\nТвой баланс: <b>{u['coins']}🍁</b>\nВыплата при победе: <b>x2</b>\n\nВведи сумму ставки (целое число от 1🍁):"
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
     await q.answer()
 
