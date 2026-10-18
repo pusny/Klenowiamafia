@@ -459,33 +459,7 @@ async def cmd_dm_other(update, ctx):
     uid = update.effective_user.id
     db_get_user(uid, update.effective_user)
     
-    if uid in CASINO_AWAITING:
-        CASINO_AWAITING.discard(uid)
-        try:
-            bet = int(msg.text.strip())
-            if bet < 1: raise ValueError
-        except ValueError:
-            await msg.reply_text("❌ Неверная сумма. Введи целое число больше 0.", reply_markup=_menu_main_kb(uid))
-            return
-            
-        u = db_get_user(uid, msg.from_user)
-        if u['coins'] < bet:
-            await msg.reply_text(f"❌ У тебя только {u['coins']}🍁.", reply_markup=_menu_main_kb(uid))
-            return
-            
-        chance = int(db_get_setting("casino_chance", "45"))
-        u['coins'] -= bet
-        
-        if random.randint(1, 100) <= chance:
-            win = bet * 2
-            u['coins'] += win
-            db_save_user(uid, **u)
-            await msg.reply_text(f"🎆🎇🎉 <b>ПОБЕДА!</b> 🎉🎇🎆\n\nТы выиграл <b>{win}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
-        else:
-            db_save_user(uid, **u)
-            await msg.reply_text(f"💀 <b>Проигрыш...</b>\n\nТы потерял <b>{bet}🍁</b>.\nТвой баланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
-        return
-
+    # 1. Сначала проверяем админку
     if uid in ADMIN_STATE:
         action = ADMIN_STATE.pop(uid)
         parts = msg.text.split(maxsplit=2)
@@ -495,11 +469,11 @@ async def cmd_dm_other(update, ctx):
                 target, amount = int(parts[0].replace("@", "")), int(parts[1])
                 u = db_get_user(target)
                 db_save_user(target, coins=u['coins']+amount)
-                await msg.reply_text(f"✅ Выдано {amount}🍁 юзеру {target}")
+                await msg.reply_text(f"✅ Выдано {amount}🍁 юзеру {target}", reply_markup=_menu_main_kb(uid))
             elif action == "give_level" and len(parts) >= 2:
                 target, lvl = int(parts[0].replace("@", "")), int(parts[1])
                 db_save_user(target, level=lvl)
-                await msg.reply_text(f"✅ Выдан уровень {lvl} юзеру {target}")
+                await msg.reply_text(f"✅ Выдан уровень {lvl} юзеру {target}", reply_markup=_menu_main_kb(uid))
             elif action == "give_title" and len(parts) >= 2:
                 target = int(parts[0].replace("@", ""))
                 title = " ".join(parts[1:])
@@ -507,16 +481,17 @@ async def cmd_dm_other(update, ctx):
                 if title not in u['unlocked_titles']:
                     u['unlocked_titles'].append(title)
                 db_save_user(target, title=title, unlocked_titles=u['unlocked_titles'])
-                await msg.reply_text(f"✅ Выдан титул '{title}' юзеру {target}")
-            elif action == "casino_chance":
+                await msg.reply_text(f"✅ Выдан титул '{title}' юзеру {target}", reply_markup=_menu_main_kb(uid))
+            elif action == "casino_chance" and len(parts) >= 1:
                 chance = int(parts[0])
                 if chance < 1 or chance > 99: raise ValueError
                 db_set_setting("casino_chance", str(chance))
-                await msg.reply_text(f"✅ Шанс победы в казино теперь: {chance}%")
+                await msg.reply_text(f"✅ Шанс победы в казино теперь: {chance}%", reply_markup=_menu_main_kb(uid))
         except Exception:
-            await msg.reply_text("❌ Ошибка. Проверь формат ввода.")
+            await msg.reply_text("❌ Ошибка. Проверь формат ввода.", reply_markup=_menu_main_kb(uid))
         return
-
+        
+    # 2. Потом крокодила
     if uid in CROC_AWAITING:
         chat_id = CROC_AWAITING.pop(uid)
         if "|" in msg.text:
@@ -528,7 +503,34 @@ async def cmd_dm_other(update, ctx):
             except Exception:
                 pass
         else:
-            await msg.reply_text("❌ Ошибка. Пиши: `Слово | Описание`")
+            await msg.reply_text("❌ Ошибка. Пиши: <code>Слово | Описание</code>", parse_mode=ParseMode.HTML)
+        return
+
+    # 3. Потом казино
+    if uid in CASINO_AWAITING:
+        try:
+            bet = int(msg.text.strip())
+            if bet < 1: raise ValueError
+        except ValueError:
+            await msg.reply_text("❌ Неверная сумма. Введи целое число больше 0.", reply_markup=_menu_back_kb(0))
+            return
+            
+        u = db_get_user(uid, msg.from_user)
+        if u['coins'] < bet:
+            await msg.reply_text(f"❌ У тебя только {u['coins']}🍁.", reply_markup=_menu_back_kb(0))
+            return
+            
+        chance = int(db_get_setting("casino_chance", "45"))
+        u['coins'] -= bet
+        
+        if random.randint(1, 100) <= chance:
+            win = bet * 2
+            u['coins'] += win
+            db_save_user(uid, **u)
+            await msg.reply_text(f"🎆🎇🎉 <b>ПОБЕДА!</b> 🎉🎇🎆\n\nТы выиграл <b>{win}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>\n\n<i>Можешь ввести следующую ставку!</i>", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
+        else:
+            db_save_user(uid, **u)
+            await msg.reply_text(f"💀 <b>Проигрыш...</b>\n\nТы потерял <b>{bet}🍁</b>.\nТвой баланс: <b>{u['coins']}🍁</b>\n\n<i>Можешь ввести следующую ставку!</i>", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
         return
         
     await msg.reply_text(_menu_text(uid, update.effective_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
@@ -934,6 +936,9 @@ async def cb_vote(update, ctx):
 async def cb_open_menu(update, ctx):
     q = update.callback_query
     if not q: return
+    CASINO_AWAITING.discard(q.from_user.id)
+    ADMIN_STATE.pop(q.from_user.id, None)
+    CROC_AWAITING.pop(q.from_user.id, None)
     try: 
         chat_id = int(q.data.split(":")[1])
     except Exception: 
@@ -944,6 +949,9 @@ async def cb_open_menu(update, ctx):
 async def cb_menu_main(update, ctx):
     q = update.callback_query
     if not q: return
+    CASINO_AWAITING.discard(q.from_user.id)
+    ADMIN_STATE.pop(q.from_user.id, None)
+    CROC_AWAITING.pop(q.from_user.id, None)
     try: 
         chat_id = int(q.data.split(":")[2])
     except Exception: 
@@ -1227,9 +1235,12 @@ async def cb_menu_buy(update, ctx):
 async def cb_menu_casino(update, ctx):
     q = update.callback_query
     if not q: return
+    ADMIN_STATE.pop(q.from_user.id, None)
+    CROC_AWAITING.pop(q.from_user.id, None)
+    CASINO_AWAITING.add(q.from_user.id)
+    
     u = db_get_user(q.from_user.id, q.from_user)
     chance = db_get_setting("casino_chance", "45")
-    CASINO_AWAITING.add(q.from_user.id)
     
     text = f"🎰 <b>Казино</b>\n\nТвой баланс: <b>{u['coins']}🍁</b>\nШанс победы: <b>{chance}%</b>\nВыплата при победе: <b>x2</b>\n\nВведи сумму ставки (целое число от 1🍁):"
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
@@ -1239,6 +1250,8 @@ async def cb_menu_casino(update, ctx):
 async def cb_admin_main(update, ctx):
     q = update.callback_query
     if q.from_user.id != ADMIN_ID: return await q.answer("Нет доступа", show_alert=True)
+    CASINO_AWAITING.discard(q.from_user.id)
+    CROC_AWAITING.pop(q.from_user.id, None)
     
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🍁 Выдать листики", callback_data="admin:act:give_coins")],
