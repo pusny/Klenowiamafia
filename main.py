@@ -497,6 +497,7 @@ async def cmd_dm_other(update, ctx):
                 db_save_user(target, coins=u['coins']+amount)
                 _check_rich_achievements(target)
                 await msg.reply_text(f"✅ Выдано {amount}🍁 юзеру {target}", reply_markup=_menu_main_kb(uid))
+                await _safe_send(ctx.bot, target, f"🍁 <b>Уведомление</b>\n\nТебе зачислено <b>{amount}🍁</b>!\nТвой новый баланс: <b>{u['coins']+amount}🍁</b>", parse_mode=ParseMode.HTML)
             elif action == "give_level" and len(parts) >= 2:
                 target, lvl = int(parts[0].replace("@", "")), int(parts[1])
                 db_save_user(target, level=lvl)
@@ -563,10 +564,15 @@ async def cmd_dm_other(update, ctx):
                 u['coins'] += win
                 db_save_user(uid, coins=u['coins'])
                 _check_rich_achievements(uid)
-                await msg.reply_text(f"🎆🎇🎉 <b>ПОБЕДА!</b> 🎉🎇🎆\n\nТы выиграл <b>{win}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>\n\n<i>Можешь ввести следующую ставку!</i>", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
+                res_text = f"🎆🎇🎉 <b>ПОБЕДА!</b> 🎉🎇🎆\n\nТы выиграл <b>{win}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат или нажми кнопку ниже.</i>"
             else:
-                await msg.reply_text(f"💀 <b>Проигрыш...</b>\n\nТы потерял <b>{bet}🍁</b>.\nТвой баланс: <b>{u['coins']}🍁</b>\n\n<i>Можешь ввести следующую ставку!</i>", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
-            ACTIVE_BETS.pop(uid, None)
+                res_text = f"💀 <b>Проигрыш...</b>\n\nТы потерял <b>{bet}🍁</b>.\nТвой баланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат или нажми кнопку ниже.</i>"
+            
+            game_data['amount'] = 0
+            ACTIVE_BETS[uid] = game_data
+            CASINO_AWAITING.add(uid)
+            
+            await msg.reply_text(res_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎰 В казино", callback_data="menu:casino:0")]]))
         elif game_data['game'] == 'coin':
             kb = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🦅 Орел", callback_data="casino:coin:heads"), InlineKeyboardButton("🪙 Решка", callback_data="casino:coin:tails")],
@@ -1309,6 +1315,7 @@ async def cb_menu_casino(update, ctx):
         u['coins'] += refund_data['amount']
         db_save_user(q.from_user.id, coins=u['coins'])
         
+    CASINO_AWAITING.discard(q.from_user.id)
     u = db_get_user(q.from_user.id, q.from_user)
     text = f"🎰 <b>Казино</b>\n\nТвой баланс: <b>{u['coins']}🍁</b>\n\nВыбери игру:"
     kb = InlineKeyboardMarkup([
@@ -1350,9 +1357,16 @@ async def cb_coin_resolve(update, ctx):
         u['coins'] += win
         db_save_user(uid, coins=u['coins'])
         _check_rich_achievements(uid)
-        await q.edit_message_text(f"🪙 Выпало: <b>{result_side}</b>!\n\n🎉 <b>ПОБЕДА!</b>\nТы выиграл <b>{win}🍁</b>!\nБаланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
+        res_text = f"🪙 Выпало: <b>{result_side}</b>!\n\n🎉 <b>ПОБЕДА!</b>\nТы выиграл <b>{win}🍁</b>!\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
     else:
-        await q.edit_message_text(f"🪙 Выпало: <b>{result_side}</b>...\n\n💀 <b>Проигрыш...</b>\nТы потерял <b>{bet}🍁</b>.\nБаланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
+        res_text = f"🪙 Выпало: <b>{result_side}</b>...\n\n💀 <b>Проигрыш...</b>\nТы потерял <b>{bet}🍁</b>.\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
+        
+    game_data['amount'] = 0
+    ACTIVE_BETS[uid] = game_data
+    CASINO_AWAITING.add(uid)
+    
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎰 В казино", callback_data="menu:casino:0")]])
+    await q.edit_message_text(res_text, parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 async def cb_dice_resolve(update, ctx):
@@ -1375,9 +1389,16 @@ async def cb_dice_resolve(update, ctx):
         u['coins'] += win
         db_save_user(uid, coins=u['coins'])
         _check_rich_achievements(uid)
-        await q.edit_message_text(f"🎲 Выпало: <b>{result_num}</b>!\n\n🎉 <b>ПОБЕДА!</b>\nТы выиграл <b>{win}🍁</b>!\nБаланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
+        res_text = f"🎲 Выпало: <b>{result_num}</b>!\n\n🎉 <b>ПОБЕДА!</b>\nТы выиграл <b>{win}🍁</b>!\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
     else:
-        await q.edit_message_text(f"🎲 Выпало: <b>{result_num}</b>...\n\n💀 <b>Проигрыш...</b>\nТы потерял <b>{bet}🍁</b>.\nБаланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
+        res_text = f"🎲 Выпало: <b>{result_num}</b>...\n\n💀 <b>Проигрыш...</b>\nТы потерял <b>{bet}🍁</b>.\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
+        
+    game_data['amount'] = 0
+    ACTIVE_BETS[uid] = game_data
+    CASINO_AWAITING.add(uid)
+    
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎰 В казино", callback_data="menu:casino:0")]])
+    await q.edit_message_text(res_text, parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 
