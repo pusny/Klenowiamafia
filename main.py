@@ -91,11 +91,12 @@ SHOP_ITEMS = {
     "blind": {"name": "Отвод глаз", "emoji": "👁‍🗨", "price": 60, "desc": "Защита от голосования днём", "modes": ("now", "match"), "cat": "game"},
     "fake": {"name": "Фальшивка", "emoji": "📄", "price": 100, "desc": "Смотритель видит вас как жителя", "modes": ("now", "match"), "cat": "game"},
     "cookie": {"name": "Печенье", "emoji": "🍪", "price": 40, "desc": "Узнать роль случайного игрока", "modes": ("now",), "cat": "game"},
-    "double_vote": {"name": "Двойной голос", "emoji": "🎯", "price": 200, "desc": "Твой голос на дневном голосовании считается за два", "modes": ("now", "match"), "cat": "game"},
-    "bomb": {"name": "Бомба", "emoji": "💣", "price": 250, "desc": "Если тебя казнят, заберешь с собой случайного голосовавшего против тебя", "modes": ("now", "match"), "cat": "game"},
-    "antidote": {"name": "Противоядие", "emoji": "💊", "price": 50, "desc": "Мгновенно снимает эффект молчания (если вас отравили)", "modes": ("now",), "cat": "game"},
     
-    "case": {"name": "Кейс удачи", "emoji": "📦", "price": 100, "desc": "Открывает случайную сумму от -250 до 500 листиков (можешь уйти в минус)", "modes": ("now",), "cat": "misc"},
+    "double_vote": {"name": "Двойной голос", "emoji": "🎯", "price": 200, "desc": "Твой голос на дневном голосовании считается за два", "modes": ("now", "match"), "cat": "active"},
+    "bomb": {"name": "Бомба", "emoji": "💣", "price": 250, "desc": "Если тебя казнят, заберешь с собой случайного голосовавшего против тебя", "modes": ("now", "match"), "cat": "active"},
+    "antidote": {"name": "Противоядие", "emoji": "💊", "price": 50, "desc": "Мгновенно снимает эффект молчания (если вас отравили)", "modes": ("now",), "cat": "active"},
+    
+    "case": {"name": "Кейс удачи", "emoji": "📦", "price": 100, "desc": "Открывает случайную сумму (можешь уйти в минус)", "modes": ("now",), "cat": "misc"},
     "custom_title": {"name": "Свой титул", "emoji": "🎨", "price": 2000, "desc": "Позволяет задать свой текст в качестве титула (до 15 символов)", "modes": ("now",), "cat": "misc"},
 }
 
@@ -198,6 +199,10 @@ def _init_db():
             conn.execute("ALTER TABLE users_data ADD COLUMN mafia_wins INTEGER DEFAULT 0")
         if "city_wins" not in cols:
             conn.execute("ALTER TABLE users_data ADD COLUMN city_wins INTEGER DEFAULT 0")
+            
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_chance', '50')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_max_win', '500')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_max_loss', '250')")
         conn.commit()
 
 _init_db()
@@ -214,6 +219,16 @@ def ban_user(uid):
 def unban_user(uid):
     with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
         conn.execute("DELETE FROM bans WHERE user_id=?", (uid,))
+        conn.commit()
+
+def db_get_setting(key, default=""):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        row = conn.execute("SELECT value FROM bot_settings WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+def db_set_setting(key, value):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, str(value)))
         conn.commit()
 
 def db_get_user(user_id, tg_user=None):
@@ -636,6 +651,11 @@ async def cmd_dm_other(update, ctx):
                 target = int(parts[0].replace("@", ""))
                 unban_user(target)
                 await msg.reply_text(f"✅ Юзер {target} успешно разбанен.", reply_markup=_menu_main_kb(uid))
+            elif action.startswith("case_set_"):
+                setting = action.replace("case_set_", "")
+                val = int(parts[0])
+                db_set_setting(f"case_{setting}", str(val))
+                await msg.reply_text(f"✅ Настройка {setting} обновлена: {val}", reply_markup=_menu_main_kb(uid))
         except Exception:
             await msg.reply_text("❌ Ошибка. Проверь формат ввода.", reply_markup=_menu_main_kb(uid))
         return
@@ -1340,7 +1360,17 @@ async def cb_inv_use(update, ctx):
         u['inventory'][iid] -= 1
         if u['inventory'][iid] == 0: del u['inventory'][iid]
         
-        reward = random.randint(-250, 500)
+        chance = int(db_get_setting("case_chance", "50"))
+        max_win = int(db_get_setting("case_max_win", "500"))
+        max_loss = int(db_get_setting("case_max_loss", "250"))
+        
+        won = random.randint(1, 100) <= chance
+        
+        if won:
+            reward = random.randint(10, max_win) if max_win >= 10 else max_win
+        else:
+            reward = random.randint(-max_loss, -10) if max_loss >= 10 else -max_loss
+            
         u['coins'] += reward
         db_save_user(q.from_user.id, **u)
         _check_rich_achievements(q.from_user.id)
@@ -1512,10 +1542,45 @@ async def cb_admin_main(update, ctx):
         [InlineKeyboardButton("🔍 Профиль юзера", callback_data="admin:act:view_profile")],
         [InlineKeyboardButton("🚫 Забанить юзера", callback_data="admin:act:ban_user")],
         [InlineKeyboardButton("✅ Разбанить юзера", callback_data="admin:act:unban_user")],
+        [InlineKeyboardButton("📦 Настройки Кейса", callback_data="admin:case")],
         [InlineKeyboardButton("👥 Список юзеров", callback_data="admin:users")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu:main:0")]
     ])
     await q.edit_message_text("🛠 <b>Админ-панель</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await q.answer()
+
+async def cb_admin_case(update, ctx):
+    q = update.callback_query
+    chance = db_get_setting("case_chance", "50")
+    max_win = db_get_setting("case_max_win", "500")
+    max_loss = db_get_setting("case_max_loss", "250")
+    
+    text = (f"📦 <b>Настройки Кейса удачи</b>\n\n"
+            f"Шанс выигрыша: <b>{chance}%</b>\n"
+            f"Макс. выигрыш: <b>{max_win}🍁</b>\n"
+            f"Макс. проигрыш: <b>{max_loss}🍁</b>\n\n"
+            f"Что настраиваем?")
+            
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎯 Шанс победы", callback_data="admin:case_set:chance")],
+        [InlineKeyboardButton("📈 Макс. выигрыш", callback_data="admin:case_set:max_win")],
+        [InlineKeyboardButton("📉 Макс. проигрыш", callback_data="admin:case_set:max_loss")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="admin:main")]
+    ])
+    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    await q.answer()
+
+async def cb_admin_case_set(update, ctx):
+    q = update.callback_query
+    setting = q.data.split(":")[2]
+    ADMIN_STATE[q.from_user.id] = f"case_set_{setting}"
+    
+    prompts = {
+        "chance": "Отправь новый шанс выигрыша в кейсе (в %, от 1 до 99):",
+        "max_win": "Отправь максимальную сумму выигрыша (например, 1000):",
+        "max_loss": "Отправь максимальную сумму проигрыша (например, 500):"
+    }
+    await q.edit_message_text(f"🛠 {prompts[setting]}", parse_mode=ParseMode.HTML)
     await q.answer()
 
 async def cb_admin_act(update, ctx):
@@ -1684,6 +1749,8 @@ def _build_app():
     
     app.add_handler(CallbackQueryHandler(cb_admin_main, pattern=r"^admin:main$"))
     app.add_handler(CallbackQueryHandler(cb_admin_act, pattern=r"^admin:act:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_case, pattern=r"^admin:case$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_case_set, pattern=r"^admin:case_set:"))
     app.add_handler(CallbackQueryHandler(cb_admin_users, pattern=r"^admin:users$"))
     
     app.add_handler(CallbackQueryHandler(cb_croc_new, pattern=r"^croc:new$"))
