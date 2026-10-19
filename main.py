@@ -141,6 +141,7 @@ ADMIN_STATE = {}
 CASINO_AWAITING = set()
 ACTIVE_BETS = {}
 GAMES = {}
+PENDING_MSG = {}
 
 
 def _init_db():
@@ -432,7 +433,8 @@ async def on_bot_added(update, ctx):
     set_pending_key(cm.chat.id, key)
     
     log.warning("=== KEY: %s for chat %s (%s) ===", key, cm.chat.title, cm.chat.id)
-    await ctx.bot.send_message(cm.chat.id, "🍁 Для активации введите:\n<code>активация КЛЮЧ</code>", parse_mode=ParseMode.HTML)
+    sent = await ctx.bot.send_message(cm.chat.id, "🍁 Для активации введите:\n<code>активация КЛЮЧ</code>", parse_mode=ParseMode.HTML)
+    PENDING_MSG[cm.chat.id] = sent.message_id
 
 async def cmd_activate(update, ctx):
     msg = update.effective_message
@@ -453,7 +455,19 @@ async def cmd_activate(update, ctx):
     if parts[1].strip().upper() == (get_pending_key(msg.chat.id) or "").upper():
         activate_chat(msg.chat.id)
         clear_pending_key(msg.chat.id)
-        await msg.reply_text("✅ Чат активирован!")
+        
+        try: await msg.delete()
+        except Exception: pass
+        
+        pm_id = PENDING_MSG.pop(msg.chat.id, None)
+        if pm_id:
+            try: await ctx.bot.delete_message(chat_id=msg.chat.id, message_id=pm_id)
+            except Exception: pass
+            
+        ans = await ctx.bot.send_message(msg.chat.id, "✅ Чат активирован!")
+        await asyncio.sleep(5)
+        try: await ans.delete()
+        except Exception: pass
 
 async def guard_muted_messages(update, ctx):
     msg = update.effective_message
