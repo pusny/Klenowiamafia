@@ -1456,15 +1456,16 @@ async def cb_coin_resolve(update, ctx):
     chance = int(db_get_setting("coin_chance", "45"))
     won = random.randint(1, 100) <= chance
     
-    result_side = "Орел" if random.choice(["heads", "tails"]) == "heads" else "Решка"
-    
+    # ИСПРАВЛЕНИЕ ЛОГИКИ
     if won:
+        result_side = "Орел" if choice == "heads" else "Решка"
         win = bet * 2
         u['coins'] += win
         db_save_user(uid, coins=u['coins'])
         _check_rich_achievements(uid)
         res_text = f"🪙 Выпало: <b>{result_side}</b>!\n\n🎉 <b>ПОБЕДА!</b>\nТы выиграл <b>{win}🍁</b>!\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
     else:
+        result_side = "Решка" if choice == "heads" else "Орел"
         res_text = f"🪙 Выпало: <b>{result_side}</b>...\n\n💀 <b>Проигрыш...</b>\nТы потерял <b>{bet}🍁</b>.\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
         
     game_data['amount'] = 0
@@ -1488,15 +1489,16 @@ async def cb_dice_resolve(update, ctx):
     chance = int(db_get_setting("dice_chance", "16"))
     won = random.randint(1, 100) <= chance
     
-    result_num = random.randint(1, 6)
-    
+    # ИСПРАВЛЕНИЕ ЛОГИКИ
     if won:
+        result_num = choice
         win = bet * 5
         u['coins'] += win
         db_save_user(uid, coins=u['coins'])
         _check_rich_achievements(uid)
         res_text = f"🎲 Выпало: <b>{result_num}</b>!\n\n🎉 <b>ПОБЕДА!</b>\nТы выиграл <b>{win}🍁</b>!\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
     else:
+        result_num = random.choice([i for i in range(1, 7) if i != choice])
         res_text = f"🎲 Выпало: <b>{result_num}</b>...\n\n💀 <b>Проигрыш...</b>\nТы потерял <b>{bet}🍁</b>.\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
         
     game_data['amount'] = 0
