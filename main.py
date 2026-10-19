@@ -494,10 +494,22 @@ async def cmd_dm_other(update, ctx):
             if action == "give_coins" and len(parts) >= 2:
                 target, amount = int(parts[0].replace("@", "")), int(parts[1])
                 u = db_get_user(target)
-                db_save_user(target, coins=u['coins']+amount)
+                new_balance = u['coins'] + amount
+                
+                if new_balance < 0:
+                    return await msg.reply_text(f"❌ У юзера {target} только {u['coins']}🍁. Нельзя списать {abs(amount)}.", reply_markup=_menu_main_kb(uid))
+                
+                db_save_user(target, coins=new_balance)
                 _check_rich_achievements(target)
-                await msg.reply_text(f"✅ Выдано {amount}🍁 юзеру {target}", reply_markup=_menu_main_kb(uid))
-                await _safe_send(ctx.bot, target, f"🍁 <b>Уведомление</b>\n\nТебе зачислено <b>{amount}🍁</b>!\nТвой новый баланс: <b>{u['coins']+amount}🍁</b>", parse_mode=ParseMode.HTML)
+                
+                if amount > 0:
+                    await msg.reply_text(f"✅ Выдано {amount}🍁 юзеру {target}", reply_markup=_menu_main_kb(uid))
+                    await _safe_send(ctx.bot, target, f"🍁 <b>Уведомление</b>\n\nТебе зачислено <b>{amount}🍁</b>!\nТвой новый баланс: <b>{new_balance}🍁</b>", parse_mode=ParseMode.HTML)
+                elif amount < 0:
+                    await msg.reply_text(f"✅ Списано {abs(amount)}🍁 у юзера {target}", reply_markup=_menu_main_kb(uid))
+                    await _safe_send(ctx.bot, target, f"🍁 <b>Уведомление</b>\n\nУ тебя списано <b>{abs(amount)}🍁</b>.\nТвой новый баланс: <b>{new_balance}🍁</b>", parse_mode=ParseMode.HTML)
+                else:
+                    await msg.reply_text("Сумма 0, ничего не изменилось.", reply_markup=_menu_main_kb(uid))
             elif action == "give_level" and len(parts) >= 2:
                 target, lvl = int(parts[0].replace("@", "")), int(parts[1])
                 db_save_user(target, level=lvl)
@@ -1409,7 +1421,7 @@ async def cb_admin_main(update, ctx):
     CROC_AWAITING.pop(q.from_user.id, None)
     
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🍁 Выдать листики", callback_data="admin:act:give_coins")],
+        [InlineKeyboardButton("🍁 Выдать/Списать листики", callback_data="admin:act:give_coins")],
         [InlineKeyboardButton("⭐ Выдать уровень", callback_data="admin:act:give_level")],
         [InlineKeyboardButton("👑 Выдать титул", callback_data="admin:act:give_title")],
         [InlineKeyboardButton("🎰 Настройки Казино", callback_data="admin:casino")],
@@ -1424,7 +1436,7 @@ async def cb_admin_act(update, ctx):
     act = q.data.split(":")[2]
     ADMIN_STATE[q.from_user.id] = act
     prompts = {
-        "give_coins": "Отправь: <code>ID количество</code>",
+        "give_coins": "Отправь: <code>ID количество</code>\n<i>(чтобы списать, напиши с минусом, например -100)</i>",
         "give_level": "Отправь: <code>ID уровень</code>",
         "give_title": "Отправь: <code>ID Титул</code>"
     }
