@@ -87,45 +87,65 @@ ROLE_DISTRIBUTION = {
 }
 
 SHOP_ITEMS = {
-    "amulet": {"name": "Оберег", "emoji": "🛡", "price": 30, "desc": "Защита от убийства", "modes": ("now", "match")},
-    "blind": {"name": "Отвод глаз", "emoji": "👁‍🗨", "price": 25, "desc": "Защита от голосования", "modes": ("now", "match")},
-    "fake": {"name": "Фальшивка", "emoji": "📄", "price": 40, "desc": "Смотритель видит вас как жителя", "modes": ("now", "match")},
-    "cookie": {"name": "Печенье", "emoji": "🍪", "price": 15, "desc": "Узнать роль случайного игрока", "modes": ("now",)},
+    "amulet": {"name": "Оберег", "emoji": "🛡", "price": 75, "desc": "Защита от убийства ночью", "modes": ("now", "match"), "cat": "game"},
+    "blind": {"name": "Отвод глаз", "emoji": "👁‍🗨", "price": 60, "desc": "Защита от голосования днём", "modes": ("now", "match"), "cat": "game"},
+    "fake": {"name": "Фальшивка", "emoji": "📄", "price": 100, "desc": "Смотритель видит вас как жителя", "modes": ("now", "match"), "cat": "game"},
+    "cookie": {"name": "Печенье", "emoji": "🍪", "price": 40, "desc": "Узнать роль случайного игрока", "modes": ("now",), "cat": "game"},
+    "double_vote": {"name": "Двойной голос", "emoji": "🎯", "price": 200, "desc": "Твой голос на дневном голосовании считается за два", "modes": ("now", "match"), "cat": "game"},
+    "bomb": {"name": "Бомба", "emoji": "💣", "price": 250, "desc": "Если тебя казнят, заберешь с собой случайного голосовавшего против тебя", "modes": ("now", "match"), "cat": "game"},
+    "antidote": {"name": "Противоядие", "emoji": "💊", "price": 50, "desc": "Мгновенно снимает эффект молчания (если вас отравили)", "modes": ("now",), "cat": "game"},
+    
+    "case": {"name": "Кейс удачи", "emoji": "📦", "price": 100, "desc": "Открывает случайную сумму от -250 до 500 листиков (можешь уйти в минус)", "modes": ("now",), "cat": "misc"},
+    "custom_title": {"name": "Свой титул", "emoji": "🎨", "price": 2000, "desc": "Позволяет задать свой текст в качестве титула (до 15 символов)", "modes": ("now",), "cat": "misc"},
 }
 
 TITLES_SHOP = {
     "novice": {"name": "Новичок", "emoji": "🐣", "price": 0, "ach_req": 0, "daily_bonus": 5},
-    "leaf_collector": {"name": "Собиратель листвы", "emoji": "🍁", "price": 50, "ach_req": 0, "daily_bonus": 7},
-    "guardian": {"name": "Страж Клена", "emoji": "🌳", "price": 150, "ach_req": 0, "daily_bonus": 12},
-    "king": {"name": "Осенний Король", "emoji": "👑", "price": 400, "ach_req": 0, "daily_bonus": 25},
-    "donater": {"name": "Меценат", "emoji": "💎", "price": 700, "ach_req": 0, "daily_bonus": 40},
-    "rich_boy": {"name": "Золотой Скрудж", "emoji": "💰", "price": 1200, "ach_req": 0, "daily_bonus": 70},
-    "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 5, "daily_bonus": 15},
-    "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 10, "daily_bonus": 25},
-    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 15, "daily_bonus": 45},
-    "god": {"name": "Божество Клена", "emoji": "🌌", "price": 0, "ach_req": 20, "daily_bonus": 80},
+    "leaf_collector": {"name": "Собиратель листвы", "emoji": "🍁", "price": 100, "ach_req": 0, "daily_bonus": 10},
+    "guardian": {"name": "Страж Клена", "emoji": "🌳", "price": 350, "ach_req": 0, "daily_bonus": 20},
+    "king": {"name": "Осенний Король", "emoji": "👑", "price": 800, "ach_req": 0, "daily_bonus": 40},
+    "donater": {"name": "Меценат", "emoji": "💎", "price": 1500, "ach_req": 0, "daily_bonus": 70},
+    "rich_boy": {"name": "Золотой Скрудж", "emoji": "💰", "price": 3000, "ach_req": 0, "daily_bonus": 120},
+    "godfather": {"name": "Крестный отец", "emoji": "🎩", "price": 2000, "ach_req": 0, "daily_bonus": 90},
+    "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 5, "daily_bonus": 30},
+    "sheriff": {"name": "Шериф", "emoji": "🤠", "price": 0, "ach_req": 8, "daily_bonus": 40},
+    "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 10, "daily_bonus": 50},
+    "legend": {"name": "Легенда", "emoji": "🌟", "price": 0, "ach_req": 15, "daily_bonus": 90},
+    "god": {"name": "Божество Клена", "emoji": "🌌", "price": 0, "ach_req": 20, "daily_bonus": 150},
+    "emperor": {"name": "Император", "emoji": "🏛", "price": 0, "ach_req": 25, "daily_bonus": 200},
+    "absolute": {"name": "Абсолют", "emoji": "🌠", "price": 0, "ach_req": 30, "daily_bonus": 300},
 }
 
 ALL_ACHIEVEMENTS = {
     "first_win": "🍁 Первая победа",
     "rich_100": "💰 Богач (100🍁)",
     "rich_1000": "💎 Олигарх (1000🍁)",
+    "rich_5000": "🏦 Миллионер (5000🍁)",
+    "rich_10000": "🌍 Хозяин мира (10000🍁)",
     "games_10": "🎮 10 сыгранных игр",
     "games_50": "🎮 50 сыгранных игр",
     "games_100": "🎮 100 сыгранных игр",
+    "games_500": "🎮 500 сыгранных игр",
     "wins_5": "🏆 5 побед",
     "wins_20": "🏆 20 побед",
     "wins_50": "🏆 50 побед",
+    "wins_100": "🏆 100 побед",
     "croc_1": "🐊 Первый крокодил",
     "croc_10": "🐊 Знаток слов (10)",
     "croc_50": "🐊 Крокодилий бог (50)",
+    "croc_100": "🐊 Крокодилий полубог (100)",
     "mafia_1": "🔪 Первая тень",
     "mafia_10": "🔪 Босс мафии (10)",
+    "mafia_50": "🔪 Дон мафии (50)",
     "city_1": "🕵️ Первый мирный",
     "city_10": "🕵️ Защитник города (10)",
+    "city_50": "🕵️ Мэр города (50)",
     "level_5": "⭐ Достигнут 5 уровень",
     "level_10": "🌟 Достигнут 10 уровень",
-    "level_20": "✨ Достигнут 20 уровень"
+    "level_20": "✨ Достигнут 20 уровень",
+    "level_30": "💫 Достигнут 30 уровень",
+    "level_50": "🌌 Достигнут 50 уровень",
+    "ach_10": "🎖 Собрано 10 достижений"
 }
 
 ACTIVATION_REGEX = re.compile(r"(?i)^(?:/)?(?:активация|activate)(?:\s+\S+)?$")
@@ -138,8 +158,7 @@ CROC_GAME = {}
 CROC_AWAITING = {}
 CROC_ACTIVE = set()
 ADMIN_STATE = {}
-CASINO_AWAITING = set()
-ACTIVE_BETS = {}
+CUSTOM_TITLE_AWAITING = {}
 GAMES = {}
 
 
@@ -179,10 +198,6 @@ def _init_db():
             conn.execute("ALTER TABLE users_data ADD COLUMN mafia_wins INTEGER DEFAULT 0")
         if "city_wins" not in cols:
             conn.execute("ALTER TABLE users_data ADD COLUMN city_wins INTEGER DEFAULT 0")
-            
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('casino_chance', '45')")
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('coin_chance', '45')")
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('dice_chance', '16')")
         conn.commit()
 
 _init_db()
@@ -199,16 +214,6 @@ def ban_user(uid):
 def unban_user(uid):
     with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
         conn.execute("DELETE FROM bans WHERE user_id=?", (uid,))
-        conn.commit()
-
-def db_get_setting(key, default=""):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        row = conn.execute("SELECT value FROM bot_settings WHERE key=?", (key,)).fetchone()
-        return row[0] if row else default
-
-def db_set_setting(key, value):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        conn.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, str(value)))
         conn.commit()
 
 def db_get_user(user_id, tg_user=None):
@@ -274,6 +279,15 @@ def _check_rich_achievements(uid):
     if u['coins'] >= 1000 and "rich_1000" not in u['achievements']:
         u['achievements'].append("rich_1000")
         changed = True
+    if u['coins'] >= 5000 and "rich_5000" not in u['achievements']:
+        u['achievements'].append("rich_5000")
+        changed = True
+    if u['coins'] >= 10000 and "rich_10000" not in u['achievements']:
+        u['achievements'].append("rich_10000")
+        changed = True
+    if len(u['achievements']) >= 10 and "ach_10" not in u['achievements']:
+        u['achievements'].append("ach_10")
+        changed = True
     if changed:
         db_save_user(uid, achievements=u['achievements'])
 
@@ -288,6 +302,15 @@ def _check_level_achievements(uid):
         changed = True
     if u['level'] >= 20 and "level_20" not in u['achievements']:
         u['achievements'].append("level_20")
+        changed = True
+    if u['level'] >= 30 and "level_30" not in u['achievements']:
+        u['achievements'].append("level_30")
+        changed = True
+    if u['level'] >= 50 and "level_50" not in u['achievements']:
+        u['achievements'].append("level_50")
+        changed = True
+    if len(u['achievements']) >= 10 and "ach_10" not in u['achievements']:
+        u['achievements'].append("ach_10")
         changed = True
     if changed:
         db_save_user(uid, achievements=u['achievements'])
@@ -414,7 +437,7 @@ def _menu_main_kb(user_id, chat_id=0):
         [InlineKeyboardButton("👤 Профиль", callback_data=f"menu:profile:{chat_id}"), InlineKeyboardButton("🛒 Магазин", callback_data=f"menu:shop:{chat_id}")],
         [InlineKeyboardButton("🎒 Инвентарь", callback_data=f"menu:inv:{chat_id}"), InlineKeyboardButton("🏆 Топ", callback_data=f"menu:top:{chat_id}")],
         [InlineKeyboardButton("🏅 Достижения", callback_data=f"menu:ach:{chat_id}"), InlineKeyboardButton("🍁 Бонус", callback_data=f"menu:bonus:{chat_id}")],
-        [InlineKeyboardButton("👑 Титулы", callback_data=f"menu:titles:{chat_id}"), InlineKeyboardButton("🎰 Казино", callback_data=f"menu:casino:{chat_id}")],
+        [InlineKeyboardButton("👑 Титулы", callback_data=f"menu:titles:{chat_id}")],
         [InlineKeyboardButton("💎 Купить 🍁", callback_data=f"menu:buy:{chat_id}")]
     ]
     if user_id == ADMIN_ID:
@@ -613,15 +636,21 @@ async def cmd_dm_other(update, ctx):
                 target = int(parts[0].replace("@", ""))
                 unban_user(target)
                 await msg.reply_text(f"✅ Юзер {target} успешно разбанен.", reply_markup=_menu_main_kb(uid))
-            elif action.startswith("casino_chance_"):
-                game = action.split("_")[-1]
-                chance = int(parts[0])
-                if chance < 1 or chance > 99: raise ValueError
-                key = "casino_chance" if game == "casino" else f"{game}_chance"
-                db_set_setting(key, str(chance))
-                await msg.reply_text(f"✅ Шанс для {game} теперь: {chance}%", reply_markup=_menu_main_kb(uid))
         except Exception:
             await msg.reply_text("❌ Ошибка. Проверь формат ввода.", reply_markup=_menu_main_kb(uid))
+        return
+        
+    if uid in CUSTOM_TITLE_AWAITING:
+        CUSTOM_TITLE_AWAITING.pop(uid)
+        new_title = msg.text.strip()[:15]
+        if not new_title:
+            return await msg.reply_text("❌ Титул не может быть пустым.", reply_markup=_menu_main_kb(uid))
+            
+        u = db_get_user(uid)
+        if new_title not in u['unlocked_titles']:
+            u['unlocked_titles'].append(new_title)
+        db_save_user(uid, title=new_title, unlocked_titles=u['unlocked_titles'])
+        await msg.reply_text(f"✅ Твой новый титул: <b>{html.escape(new_title)}</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
         return
         
     if uid in CROC_AWAITING:
@@ -636,58 +665,6 @@ async def cmd_dm_other(update, ctx):
                 pass
         else:
             await msg.reply_text("❌ Ошибка. Пиши: <code>Слово | Описание</code>", parse_mode=ParseMode.HTML)
-        return
-
-    if uid in CASINO_AWAITING:
-        try:
-            bet = int(msg.text.strip())
-            if bet < 1: raise ValueError
-        except ValueError:
-            await msg.reply_text("❌ Неверная сумма. Введи целое число больше 0.", reply_markup=_menu_back_kb(0))
-            return
-            
-        u = db_get_user(uid, msg.from_user)
-        if u['coins'] < bet:
-            await msg.reply_text(f"❌ У тебя только {u['coins']}🍁.", reply_markup=_menu_back_kb(0))
-            return
-            
-        game_data = ACTIVE_BETS.get(uid)
-        if not game_data: return
-        
-        u['coins'] -= bet
-        db_save_user(uid, coins=u['coins'])
-        CASINO_AWAITING.discard(uid)
-        game_data['amount'] = bet
-        
-        if game_data['game'] == 'classic':
-            chance = int(db_get_setting("casino_chance", "45"))
-            if random.randint(1, 100) <= chance:
-                win = bet * 2
-                u['coins'] += win
-                db_save_user(uid, coins=u['coins'])
-                _check_rich_achievements(uid)
-                res_text = f"🎆🎇🎉 <b>ПОБЕДА!</b> 🎉🎇🎆\n\nТы выиграл <b>{win}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат или нажми кнопку ниже.</i>"
-            else:
-                res_text = f"💀 <b>Проигрыш...</b>\n\nТы потерял <b>{bet}🍁</b>.\nТвой баланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат или нажми кнопку ниже.</i>"
-            
-            game_data['amount'] = 0
-            ACTIVE_BETS[uid] = game_data
-            CASINO_AWAITING.add(uid)
-            
-            await msg.reply_text(res_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎰 В казино", callback_data="menu:casino:0")]]))
-        elif game_data['game'] == 'coin':
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🦅 Орел", callback_data="casino:coin:heads"), InlineKeyboardButton("🪙 Решка", callback_data="casino:coin:tails")],
-                [InlineKeyboardButton("◀️ Отмена", callback_data="menu:main:0")]
-            ])
-            await msg.reply_text(f"🪙 Ставка: <b>{bet}🍁</b>\nВыбери сторону:", parse_mode=ParseMode.HTML, reply_markup=kb)
-        elif game_data['game'] == 'dice':
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("1", callback_data="casino:dice:1"), InlineKeyboardButton("2", callback_data="casino:dice:2"), InlineKeyboardButton("3", callback_data="casino:dice:3")],
-                [InlineKeyboardButton("4", callback_data="casino:dice:4"), InlineKeyboardButton("5", callback_data="casino:dice:5"), InlineKeyboardButton("6", callback_data="casino:dice:6")],
-                [InlineKeyboardButton("◀️ Отмена", callback_data="menu:main:0")]
-            ])
-            await msg.reply_text(f"🎲 Ставка: <b>{bet}🍁</b>\nВыбери число:", parse_mode=ParseMode.HTML, reply_markup=kb)
         return
         
     await msg.reply_text(_menu_text(uid, update.effective_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
@@ -963,20 +940,37 @@ async def _run_vote(bot, game):
     await _send_to_chat(bot, game, f"🗳 <b>Голосование</b> 1 мин.", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
     await asyncio.sleep(60)
     
-    valid = {}
+    votes_list = []
     for v_id, t_id in game.votes.items():
         t = game.players.get(t_id)
         if t and t.has_active("blind"): 
             t.consume_active("blind")
             continue
-        valid[v_id] = t_id
+        votes_list.append(t_id)
         
-    if not valid: return await _send_to_chat(bot, game, "Никто не голосовал.")
-    c = Counter(valid.values()).most_common()
+        voter = game.players.get(v_id)
+        if voter and voter.has_active("double_vote"):
+            votes_list.append(t_id)
+            voter.consume_active("double_vote")
+            await _safe_send(bot, v_id, "🎯 Твой двойной голос сработал!")
+        
+    if not votes_list: return await _send_to_chat(bot, game, "Никто не голосовал.")
+    c = Counter(votes_list).most_common()
     if c[0][1] >= 2 and (len(c) == 1 or c[0][1] > c[1][1]):
         p = game.players[c[0][0]]
         p.alive = False
-        await _send_to_chat(bot, game, f"⚖️ Изгнан: {get_safe_name(p)} (<b>{ROLE_NAMES[p.role]}</b>)", parse_mode=ParseMode.HTML)
+        
+        text = f"⚖️ Изгнан: {get_safe_name(p)} (<b>{ROLE_NAMES[p.role]}</b>)"
+        
+        if p.has_active("bomb"):
+            voters = [v_id for v_id, t_id in game.votes.items() if t_id == p.user_id and v_id != p.user_id]
+            if voters:
+                victim_id = random.choice(voters)
+                victim = game.players[victim_id]
+                victim.alive = False
+                text += f"\n\n💣 <b>БУМ!</b> {get_safe_name(p)} взорвал <b>{get_safe_name(victim)}</b>!"
+                
+        await _send_to_chat(bot, game, text, parse_mode=ParseMode.HTML)
     else: 
         await _send_to_chat(bot, game, "⚖️ Ничья.")
 
@@ -1016,10 +1010,12 @@ async def _announce_end(bot, game):
                 u['mafia_wins'] += 1
                 if "mafia_1" not in u['achievements']: u['achievements'].append("mafia_1")
                 if u['mafia_wins'] >= 10 and "mafia_10" not in u['achievements']: u['achievements'].append("mafia_10")
+                if u['mafia_wins'] >= 50 and "mafia_50" not in u['achievements']: u['achievements'].append("mafia_50")
             else:
                 u['city_wins'] += 1
                 if "city_1" not in u['achievements']: u['achievements'].append("city_1")
                 if u['city_wins'] >= 10 and "city_10" not in u['achievements']: u['achievements'].append("city_10")
+                if u['city_wins'] >= 50 and "city_50" not in u['achievements']: u['achievements'].append("city_50")
             
         u['coins'] += reward
         xp_gained = 3 if won else 1
@@ -1030,15 +1026,26 @@ async def _announce_end(bot, game):
         
         if u['coins'] >= 100 and "rich_100" not in u['achievements']: u['achievements'].append("rich_100")
         if u['coins'] >= 1000 and "rich_1000" not in u['achievements']: u['achievements'].append("rich_1000")
+        if u['coins'] >= 5000 and "rich_5000" not in u['achievements']: u['achievements'].append("rich_5000")
+        if u['coins'] >= 10000 and "rich_10000" not in u['achievements']: u['achievements'].append("rich_10000")
+        
         if u['games'] >= 10 and "games_10" not in u['achievements']: u['achievements'].append("games_10")
         if u['games'] >= 50 and "games_50" not in u['achievements']: u['achievements'].append("games_50")
         if u['games'] >= 100 and "games_100" not in u['achievements']: u['achievements'].append("games_100")
+        if u['games'] >= 500 and "games_500" not in u['achievements']: u['achievements'].append("games_500")
+        
         if u['wins'] >= 5 and "wins_5" not in u['achievements']: u['achievements'].append("wins_5")
         if u['wins'] >= 20 and "wins_20" not in u['achievements']: u['achievements'].append("wins_20")
         if u['wins'] >= 50 and "wins_50" not in u['achievements']: u['achievements'].append("wins_50")
+        if u['wins'] >= 100 and "wins_100" not in u['achievements']: u['achievements'].append("wins_100")
+        
         if new_lvl >= 5 and "level_5" not in u['achievements']: u['achievements'].append("level_5")
         if new_lvl >= 10 and "level_10" not in u['achievements']: u['achievements'].append("level_10")
         if new_lvl >= 20 and "level_20" not in u['achievements']: u['achievements'].append("level_20")
+        if new_lvl >= 30 and "level_30" not in u['achievements']: u['achievements'].append("level_30")
+        if new_lvl >= 50 and "level_50" not in u['achievements']: u['achievements'].append("level_50")
+        
+        if len(u['achievements']) >= 10 and "ach_10" not in u['achievements']: u['achievements'].append("ach_10")
         
         db_save_user(p.user_id, **u)
         
@@ -1094,16 +1101,10 @@ async def cb_vote(update, ctx):
 async def cb_open_menu(update, ctx):
     q = update.callback_query
     if not q: return
-    
-    refund_data = ACTIVE_BETS.pop(q.from_user.id, None)
-    if refund_data and refund_data['amount'] > 0:
-        u = db_get_user(q.from_user.id)
-        u['coins'] += refund_data['amount']
-        db_save_user(q.from_user.id, coins=u['coins'])
         
-    CASINO_AWAITING.discard(q.from_user.id)
     ADMIN_STATE.pop(q.from_user.id, None)
     CROC_AWAITING.pop(q.from_user.id, None)
+    CUSTOM_TITLE_AWAITING.pop(q.from_user.id, None)
     try: 
         chat_id = int(q.data.split(":")[1])
     except Exception: 
@@ -1114,16 +1115,10 @@ async def cb_open_menu(update, ctx):
 async def cb_menu_main(update, ctx):
     q = update.callback_query
     if not q: return
-    
-    refund_data = ACTIVE_BETS.pop(q.from_user.id, None)
-    if refund_data and refund_data['amount'] > 0:
-        u = db_get_user(q.from_user.id)
-        u['coins'] += refund_data['amount']
-        db_save_user(q.from_user.id, coins=u['coins'])
         
-    CASINO_AWAITING.discard(q.from_user.id)
     ADMIN_STATE.pop(q.from_user.id, None)
     CROC_AWAITING.pop(q.from_user.id, None)
+    CUSTOM_TITLE_AWAITING.pop(q.from_user.id, None)
     try: 
         chat_id = int(q.data.split(":")[2])
     except Exception: 
@@ -1225,11 +1220,37 @@ async def cb_menu_shop(update, ctx):
     except Exception: 
         chat_id = 0
     u = db_get_user(q.from_user.id, q.from_user)
+    
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔪 Для мафии", callback_data=f"shop:cat:{chat_id}:game")],
+        [InlineKeyboardButton("🎯 Активные", callback_data=f"shop:cat:{chat_id}:active")],
+        [InlineKeyboardButton("📦 Разное", callback_data=f"shop:cat:{chat_id}:misc")],
+        [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")]
+    ])
+    await q.edit_message_text(f"🛒 <b>Магазин</b>\n\nБаланс: <b>{u['coins']}🍁</b>\n\nВыбери раздел:", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await q.answer()
+
+async def cb_shop_cat(update, ctx):
+    q = update.callback_query
+    if not q: return
+    parts = q.data.split(":")
+    chat_id, cat = int(parts[2]), parts[3]
+    u = db_get_user(q.from_user.id, q.from_user)
+    
+    if cat == "game":
+        title = "🔪 Для мафии"
+    elif cat == "active":
+        title = "🎯 Активные"
+    else:
+        title = "📦 Разное"
+        
     rows = []
     for iid, item in SHOP_ITEMS.items():
-        rows.append([InlineKeyboardButton(f"{item['emoji']} {item['name']} — {item['price']}🍁", callback_data=f"shop:item:{chat_id}:{iid}")])
-    rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")])
-    await q.edit_message_text(f"🛒 <b>Магазин</b>\n\nБаланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
+        if item.get("cat") == cat:
+            rows.append([InlineKeyboardButton(f"{item['emoji']} {item['name']} — {item['price']}🍁", callback_data=f"shop:item:{chat_id}:{iid}")])
+            
+    rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:shop:{chat_id}")])
+    await q.edit_message_text(f"{title}\n\nБаланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
     await q.answer()
 
 async def cb_shop_item(update, ctx):
@@ -1240,7 +1261,8 @@ async def cb_shop_item(update, ctx):
     item = SHOP_ITEMS.get(iid)
     if not item: return await q.answer("Нет предмета")
     
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Купить", callback_data=f"shop:buy:{chat_id}:{iid}")], [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:shop:{chat_id}")]])
+    cat = item.get("cat", "game")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Купить", callback_data=f"shop:buy:{chat_id}:{iid}")], [InlineKeyboardButton("◀️ Назад", callback_data=f"shop:cat:{chat_id}:{cat}")]])
     await q.edit_message_text(f"{item['emoji']} <b>{item['name']}</b>\n{item['desc']}\nЦена: <b>{item['price']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
@@ -1257,9 +1279,12 @@ async def cb_shop_buy(update, ctx):
     u['inventory'][iid] = u['inventory'].get(iid, 0) + 1
     db_save_user(q.from_user.id, **u)
     
+    cat = item.get("cat", "game")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ В магазин", callback_data=f"shop:cat:{chat_id}:{cat}")]])
+    
     await q.answer("Куплено!")
     try: 
-        await q.edit_message_text(f"✅ Куплено: {item['name']}\nОстаток: {u['coins']}🍁", reply_markup=_menu_back_kb(chat_id))
+        await q.edit_message_text(f"✅ Куплено: {item['name']}\nОстаток: {u['coins']}🍁", reply_markup=kb)
     except Exception: 
         pass
 
@@ -1287,12 +1312,19 @@ async def cb_inv_item(update, ctx):
     chat_id, iid = int(parts[2]), parts[3]
     item = SHOP_ITEMS.get(iid)
     
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ Сейчас", callback_data=f"inv:use:{chat_id}:{iid}:now")],
-        [InlineKeyboardButton("🎯 На матч", callback_data=f"inv:use:{chat_id}:{iid}:match")],
-        [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:inv:{chat_id}")]
-    ])
-    await q.edit_message_text(f"{item['emoji']} <b>{item['name']}</b>\n\nИспользовать?", parse_mode=ParseMode.HTML, reply_markup=kb)
+    if iid in ["case", "custom_title", "antidote"]:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⚡ Использовать", callback_data=f"inv:use:{chat_id}:{iid}:now")],
+            [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:inv:{chat_id}")]
+        ])
+        await q.edit_message_text(f"{item['emoji']} <b>{item['name']}</b>\n\n{item['desc']}", parse_mode=ParseMode.HTML, reply_markup=kb)
+    else:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⚡ Сейчас", callback_data=f"inv:use:{chat_id}:{iid}:now")],
+            [InlineKeyboardButton("🎯 На матч", callback_data=f"inv:use:{chat_id}:{iid}:match")],
+            [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:inv:{chat_id}")]
+        ])
+        await q.edit_message_text(f"{item['emoji']} <b>{item['name']}</b>\n\nИспользовать?", parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 async def cb_inv_use(update, ctx):
@@ -1303,6 +1335,63 @@ async def cb_inv_use(update, ctx):
     u = db_get_user(q.from_user.id, q.from_user)
     
     if u['inventory'].get(iid, 0) <= 0: return await q.answer("Нет предмета")
+    
+    if iid == "case":
+        u['inventory'][iid] -= 1
+        if u['inventory'][iid] == 0: del u['inventory'][iid]
+        
+        reward = random.randint(-250, 500)
+        u['coins'] += reward
+        db_save_user(q.from_user.id, **u)
+        _check_rich_achievements(q.from_user.id)
+        
+        if reward > 0:
+            await q.answer(f"🎉 Ты выиграл {reward}🍁!")
+            text = f"📦 Ты открыл кейс и получил: <b>+{reward}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>"
+        elif reward < 0:
+            await q.answer(f"💀 Ты потерял {abs(reward)}🍁!")
+            text = f"📦 Ты открыл кейс и потерял: <b>-{abs(reward)}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>"
+        else:
+            await q.answer("Ты ничего не получил.")
+            text = f"📦 Ты открыл кейс и... ничего не получил.\nТвой баланс: <b>{u['coins']}🍁</b>"
+            
+        try:
+            await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
+        except Exception: pass
+        return
+        
+    if iid == "custom_title":
+        u['inventory'][iid] -= 1
+        if u['inventory'][iid] == 0: del u['inventory'][iid]
+        db_save_user(q.from_user.id, **u)
+        
+        CUSTOM_TITLE_AWAITING[q.from_user.id] = True
+        await q.answer("Напиши свой титул в чат!")
+        try:
+            await q.edit_message_text("🎨 <b>Свой титул</b>\n\nНапиши в чат свой новый титул (до 15 символов):", parse_mode=ParseMode.HTML)
+        except Exception: pass
+        return
+        
+    if iid == "antidote":
+        game = GAMES.get(chat_id)
+        if not game or q.from_user.id not in game.players:
+            return await q.answer("Ты не в игре!", show_alert=True)
+            
+        p = game.players[q.from_user.id]
+        if not p.is_muted():
+            return await q.answer("Ты и так не молчишь!", show_alert=True)
+            
+        u['inventory'][iid] -= 1
+        if u['inventory'][iid] == 0: del u['inventory'][iid]
+        db_save_user(q.from_user.id, **u)
+        
+        p.muted_until = 0
+        await q.answer("💊 Противоядие сработало!")
+        try:
+            await q.edit_message_text("💊 <b>Противоядие использовано!</b>\nТеперь ты можешь снова говорить.", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
+        except Exception: pass
+        return
+        
     u['inventory'][iid] -= 1
     if u['inventory'][iid] == 0: del u['inventory'][iid]
     
@@ -1405,113 +1494,14 @@ async def cb_menu_buy(update, ctx):
     except Exception: 
         chat_id = 0
     
-    text = f"💎 <b>Покупка листиков</b>\n\nАктуальный курс: <b>1 листик = 3 рубля</b>\n\nДля покупки напишите нашему менеджеру: {SELLER_USERNAME}\nПосле перевода он выдаст вам листики.\n\n<i>(Обязательно укажите ваш ID: <code>{q.from_user.id}</code>)</i>"
+    text = f"💎 <b>Покупка листиков</b>\n\nАктуальный курс: <b>1 листик = 5 рублей</b>\n\nДля покупки напишите нашему менеджеру: {SELLER_USERNAME}\nПосле перевода он выдаст вам листики.\n\n<i>(Обязательно укажите ваш ID: <code>{q.from_user.id}</code>)</i>"
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
-    await q.answer()
-
-async def cb_menu_casino(update, ctx):
-    q = update.callback_query
-    if not q: return
-    ADMIN_STATE.pop(q.from_user.id, None)
-    CROC_AWAITING.pop(q.from_user.id, None)
-    
-    refund_data = ACTIVE_BETS.pop(q.from_user.id, None)
-    if refund_data and refund_data['amount'] > 0:
-        u = db_get_user(q.from_user.id)
-        u['coins'] += refund_data['amount']
-        db_save_user(q.from_user.id, coins=u['coins'])
-        
-    CASINO_AWAITING.discard(q.from_user.id)
-    u = db_get_user(q.from_user.id, q.from_user)
-    text = f"🎰 <b>Казино</b>\n\nТвой баланс: <b>{u['coins']}🍁</b>\n\nВыбери игру:"
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎰 Классика (x2)", callback_data="casino:game:classic")],
-        [InlineKeyboardButton("🪙 Монетка (x2)", callback_data="casino:game:coin")],
-        [InlineKeyboardButton("🎲 Кости (x5)", callback_data="casino:game:dice")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="menu:main:0")]
-    ])
-    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
-    await q.answer()
-
-async def cb_casino_game(update, ctx):
-    q = update.callback_query
-    if not q: return
-    game = q.data.split(":")[2]
-    ACTIVE_BETS[q.from_user.id] = {'game': game, 'amount': 0}
-    CASINO_AWAITING.add(q.from_user.id)
-    
-    await q.edit_message_text(f"🎰 <b>{game.capitalize()}</b>\n\nВведи сумму ставки (целое число от 1🍁):", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(0))
-    await q.answer()
-
-async def cb_coin_resolve(update, ctx):
-    q = update.callback_query
-    uid = q.from_user.id
-    game_data = ACTIVE_BETS.pop(uid, None)
-    if not game_data: return await q.answer("Ошибка. Ставка не найдена.", show_alert=True)
-    
-    choice = q.data.split(":")[2]
-    bet = game_data['amount']
-    u = db_get_user(uid)
-    
-    chance = int(db_get_setting("coin_chance", "45"))
-    won = random.randint(1, 100) <= chance
-    
-    if won:
-        result_side = "Орел" if choice == "heads" else "Решка"
-        win = bet * 2
-        u['coins'] += win
-        db_save_user(uid, coins=u['coins'])
-        _check_rich_achievements(uid)
-        res_text = f"🪙 Выпало: <b>{result_side}</b>!\n\n🎉 <b>ПОБЕДА!</b>\nТы выиграл <b>{win}🍁</b>!\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
-    else:
-        result_side = "Решка" if choice == "heads" else "Орел"
-        res_text = f"🪙 Выпало: <b>{result_side}</b>...\n\n💀 <b>Проигрыш...</b>\nТы потерял <b>{bet}🍁</b>.\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
-        
-    game_data['amount'] = 0
-    ACTIVE_BETS[uid] = game_data
-    CASINO_AWAITING.add(uid)
-    
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎰 В казино", callback_data="menu:casino:0")]])
-    await q.edit_message_text(res_text, parse_mode=ParseMode.HTML, reply_markup=kb)
-    await q.answer()
-
-async def cb_dice_resolve(update, ctx):
-    q = update.callback_query
-    uid = q.from_user.id
-    game_data = ACTIVE_BETS.pop(uid, None)
-    if not game_data: return await q.answer("Ошибка. Ставка не найдена.", show_alert=True)
-    
-    choice = int(q.data.split(":")[2])
-    bet = game_data['amount']
-    u = db_get_user(uid)
-    
-    chance = int(db_get_setting("dice_chance", "16"))
-    won = random.randint(1, 100) <= chance
-    
-    if won:
-        result_num = choice
-        win = bet * 5
-        u['coins'] += win
-        db_save_user(uid, coins=u['coins'])
-        _check_rich_achievements(uid)
-        res_text = f"🎲 Выпало: <b>{result_num}</b>!\n\n🎉 <b>ПОБЕДА!</b>\nТы выиграл <b>{win}🍁</b>!\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
-    else:
-        result_num = random.choice([i for i in range(1, 7) if i != choice])
-        res_text = f"🎲 Выпало: <b>{result_num}</b>...\n\n💀 <b>Проигрыш...</b>\nТы потерял <b>{bet}🍁</b>.\nБаланс: <b>{u['coins']}🍁</b>\n\n<i>Введи следующую ставку в чат.</i>"
-        
-    game_data['amount'] = 0
-    ACTIVE_BETS[uid] = game_data
-    CASINO_AWAITING.add(uid)
-    
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎰 В казино", callback_data="menu:casino:0")]])
-    await q.edit_message_text(res_text, parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 
 async def cb_admin_main(update, ctx):
     q = update.callback_query
     if q.from_user.id != ADMIN_ID: return await q.answer("Нет доступа", show_alert=True)
-    CASINO_AWAITING.discard(q.from_user.id)
     CROC_AWAITING.pop(q.from_user.id, None)
     
     kb = InlineKeyboardMarkup([
@@ -1522,7 +1512,6 @@ async def cb_admin_main(update, ctx):
         [InlineKeyboardButton("🔍 Профиль юзера", callback_data="admin:act:view_profile")],
         [InlineKeyboardButton("🚫 Забанить юзера", callback_data="admin:act:ban_user")],
         [InlineKeyboardButton("✅ Разбанить юзера", callback_data="admin:act:unban_user")],
-        [InlineKeyboardButton("🎰 Настройки Казино", callback_data="admin:casino")],
         [InlineKeyboardButton("👥 Список юзеров", callback_data="admin:users")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu:main:0")]
     ])
@@ -1543,30 +1532,6 @@ async def cb_admin_act(update, ctx):
         "unban_user": "Отправь: <code>ID юзера</code>"
     }
     await q.edit_message_text(f"🛠 {prompts[act]}", parse_mode=ParseMode.HTML)
-    await q.answer()
-
-async def cb_admin_casino(update, ctx):
-    q = update.callback_query
-    chance_classic = db_get_setting("casino_chance", "45")
-    chance_coin = db_get_setting("coin_chance", "45")
-    chance_dice = db_get_setting("dice_chance", "16")
-    
-    text = f"🎰 <b>Настройки азартных игр</b>\n\nКлассика: <b>{chance_classic}%</b>\nМонетка: <b>{chance_coin}%</b>\nКости: <b>{chance_dice}%</b>\n\nЧто настраиваем?"
-    
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎰 Классика", callback_data="admin:casino_set:casino")],
-        [InlineKeyboardButton("🪙 Монетка", callback_data="admin:casino_set:coin")],
-        [InlineKeyboardButton("🎲 Кости", callback_data="admin:casino_set:dice")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="admin:main")]
-    ])
-    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
-    await q.answer()
-
-async def cb_admin_casino_set(update, ctx):
-    q = update.callback_query
-    game = q.data.split(":")[2]
-    ADMIN_STATE[q.from_user.id] = f"casino_chance_{game}"
-    await q.edit_message_text(f"🛠 Отправь новый шанс победы для игры ({game}) в % (от 1 до 99):")
     await q.answer()
 
 async def cb_admin_users(update, ctx):
@@ -1628,9 +1593,15 @@ async def croc_guess_mw(update, ctx):
         if "croc_1" not in u['achievements']: u['achievements'].append("croc_1")
         if u['croc_wins'] >= 10 and "croc_10" not in u['achievements']: u['achievements'].append("croc_10")
         if u['croc_wins'] >= 50 and "croc_50" not in u['achievements']: u['achievements'].append("croc_50")
+        if u['croc_wins'] >= 100 and "croc_100" not in u['achievements']: u['achievements'].append("croc_100")
+        
         if new_lvl >= 5 and "level_5" not in u['achievements']: u['achievements'].append("level_5")
         if new_lvl >= 10 and "level_10" not in u['achievements']: u['achievements'].append("level_10")
         if new_lvl >= 20 and "level_20" not in u['achievements']: u['achievements'].append("level_20")
+        if new_lvl >= 30 and "level_30" not in u['achievements']: u['achievements'].append("level_30")
+        if new_lvl >= 50 and "level_50" not in u['achievements']: u['achievements'].append("level_50")
+        
+        if len(u['achievements']) >= 10 and "ach_10" not in u['achievements']: u['achievements'].append("ach_10")
         
         db_save_user(msg.from_user.id, **u)
         _check_rich_achievements(msg.from_user.id)
@@ -1700,15 +1671,11 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_menu_titles, pattern=r"^menu:titles:"))
     app.add_handler(CallbackQueryHandler(cb_title_set, pattern=r"^title:set:"))
     app.add_handler(CallbackQueryHandler(cb_menu_shop, pattern=r"^menu:shop:"))
+    app.add_handler(CallbackQueryHandler(cb_shop_cat, pattern=r"^shop:cat:"))
     app.add_handler(CallbackQueryHandler(cb_menu_inv, pattern=r"^menu:inv:"))
     app.add_handler(CallbackQueryHandler(cb_menu_top, pattern=r"^menu:top:"))
     app.add_handler(CallbackQueryHandler(cb_menu_bonus, pattern=r"^menu:bonus:"))
     app.add_handler(CallbackQueryHandler(cb_menu_buy, pattern=r"^menu:buy:"))
-    app.add_handler(CallbackQueryHandler(cb_menu_casino, pattern=r"^menu:casino:"))
-    
-    app.add_handler(CallbackQueryHandler(cb_casino_game, pattern=r"^casino:game:"))
-    app.add_handler(CallbackQueryHandler(cb_coin_resolve, pattern=r"^casino:coin:"))
-    app.add_handler(CallbackQueryHandler(cb_dice_resolve, pattern=r"^casino:dice:"))
     
     app.add_handler(CallbackQueryHandler(cb_shop_item, pattern=r"^shop:item:"))
     app.add_handler(CallbackQueryHandler(cb_shop_buy, pattern=r"^shop:buy:"))
@@ -1717,8 +1684,6 @@ def _build_app():
     
     app.add_handler(CallbackQueryHandler(cb_admin_main, pattern=r"^admin:main$"))
     app.add_handler(CallbackQueryHandler(cb_admin_act, pattern=r"^admin:act:"))
-    app.add_handler(CallbackQueryHandler(cb_admin_casino, pattern=r"^admin:casino$"))
-    app.add_handler(CallbackQueryHandler(cb_admin_casino_set, pattern=r"^admin:casino_set:"))
     app.add_handler(CallbackQueryHandler(cb_admin_users, pattern=r"^admin:users$"))
     
     app.add_handler(CallbackQueryHandler(cb_croc_new, pattern=r"^croc:new$"))
