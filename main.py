@@ -151,6 +151,7 @@ def _init_db():
             CREATE TABLE IF NOT EXISTS activations (chat_id INTEGER PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS pending_activations (chat_id INTEGER PRIMARY KEY, key TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE IF NOT EXISTS bans (user_id INTEGER PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS users_data (
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
@@ -185,6 +186,20 @@ def _init_db():
         conn.commit()
 
 _init_db()
+
+def is_user_banned(uid):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        return conn.execute("SELECT 1 FROM bans WHERE user_id=?", (uid,)).fetchone() is not None
+
+def ban_user(uid):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute("INSERT OR IGNORE INTO bans (user_id) VALUES (?)", (uid,))
+        conn.commit()
+
+def unban_user(uid):
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+        conn.execute("DELETE FROM bans WHERE user_id=?", (uid,))
+        conn.commit()
 
 def db_get_setting(key, default=""):
     with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
@@ -414,6 +429,41 @@ def _menu_text(uid, tg_user=None):
     return f"🍁 <b>Меню</b>\n\nБаланс: <b>{u['coins']}🍁</b>\nУровень: <b>{u['level']}</b>\nТитул: <b>{u['title']}</b>"
 
 
+async def ban_middleware(update, ctx):
+    user = update.effective_user
+    if not user or user.id == ADMIN_ID:
+        return
+    if is_user_banned(user.id):
+        ban_text = (
+            f"⛔ <b>Вы забанены!</b>\n\n"
+            f"Вы не можете использовать бота.\n\n"
+            f"🛠 Приобрести разбан можете у технического специалиста: {SELLER_USERNAME}\n"
+            f"💰 Стоимость разбана: <b>500 рублей</b>."
+        )
+        try:
+            await ctx.bot.send_message(user.id, ban_text, parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+        
+        msg = update.effective_message
+        if msg and msg.chat.type != "private":
+            try:
+                await msg.reply_text("⛔ Вы забанены. Проверьте личные сообщения.")
+            except Exception:
+                pass
+        raise ApplicationHandlerStop
+
+async def ban_callback_mw(update, ctx):
+    q = update.callback_query
+    if not q: return
+    user = q.from_user
+    if not user or user.id == ADMIN_ID:
+        return
+    if is_user_banned(user.id):
+        await q.answer(f"Вы забанены. Разбан: 500 руб. у {SELLER_USERNAME}", show_alert=True)
+        raise ApplicationHandlerStop
+
+
 async def activation_mw(update, ctx):
     msg = update.effective_message
     if msg is None or msg.chat.type == "private": return
@@ -555,6 +605,14 @@ async def cmd_dm_other(update, ctx):
                         f"🏅 Достижения ({len(u['achievements'])}): {ach_str}")
                 
                 await msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
+            elif action == "ban_user" and len(parts) >= 1:
+                target = int(parts[0].replace("@", ""))
+                ban_user(target)
+                await msg.reply_text(f"✅ Юзер {target} успешно забанен.", reply_markup=_menu_main_kb(uid))
+            elif action == "unban_user" and len(parts) >= 1:
+                target = int(parts[0].replace("@", ""))
+                unban_user(target)
+                await msg.reply_text(f"✅ Юзер {target} успешно разбанен.", reply_markup=_menu_main_kb(uid))
             elif action.startswith("casino_chance_"):
                 game = action.split("_")[-1]
                 chance = int(parts[0])
@@ -1310,15 +1368,17 @@ async def cb_menu_top(update, ctx):
     
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        rows_coins = conn.execute("SELECT user_id, username, coins FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
-        rows_level = conn.execute("SELECT user_id, username, level FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
+        rows_coins = conn.execute("SELECT user_id, username, coins, title FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
+        rows_level = conn.execute("SELECT user_id, username, level, title FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
         
     lines = ["🏆 <b>Топ по листикам:</b>", ""]
     if rows_coins:
         for i, r in enumerate(rows_coins, 1):
             uname = r['username']
             link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
-            lines.append(f"{i}. {link} — {r['coins']}🍁")
+            title_name = r['title'] or 'Новичок'
+            emoji = next((t['emoji'] for t in TITLES_SHOP.values() if t['name'] == title_name), '👑')
+            lines.append(f"{i}. {link} — {r['coins']}🍁 | {emoji} {html.escape(title_name)}")
     else:
         lines.append("Пока пусто.")
         
@@ -1328,7 +1388,9 @@ async def cb_menu_top(update, ctx):
         for i, r in enumerate(rows_level, 1):
             uname = r['username']
             link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
-            lines.append(f"{i}. {link} — {r['level']} lvl")
+            title_name = r['title'] or 'Новичок'
+            emoji = next((t['emoji'] for t in TITLES_SHOP.values() if t['name'] == title_name), '👑')
+            lines.append(f"{i}. {link} — {r['level']} lvl | {emoji} {html.escape(title_name)}")
     else:
         lines.append("Пока пусто.")
         
@@ -1458,6 +1520,8 @@ async def cb_admin_main(update, ctx):
         [InlineKeyboardButton("👑 Выдать титул", callback_data="admin:act:give_title")],
         [InlineKeyboardButton("🚫 Забрать титул", callback_data="admin:act:take_title")],
         [InlineKeyboardButton("🔍 Профиль юзера", callback_data="admin:act:view_profile")],
+        [InlineKeyboardButton("🚫 Забанить юзера", callback_data="admin:act:ban_user")],
+        [InlineKeyboardButton("✅ Разбанить юзера", callback_data="admin:act:unban_user")],
         [InlineKeyboardButton("🎰 Настройки Казино", callback_data="admin:casino")],
         [InlineKeyboardButton("👥 Список юзеров", callback_data="admin:users")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu:main:0")]
@@ -1474,7 +1538,9 @@ async def cb_admin_act(update, ctx):
         "give_level": "Отправь: <code>ID уровень</code>\n<i>(учти, что уровень не может быть ниже заработанного)</i>",
         "give_title": "Отправь: <code>ID Титул</code>",
         "take_title": "Отправь: <code>ID Титул</code>",
-        "view_profile": "Отправь: <code>ID юзера</code>"
+        "view_profile": "Отправь: <code>ID юзера</code>",
+        "ban_user": "Отправь: <code>ID юзера</code>",
+        "unban_user": "Отправь: <code>ID юзера</code>"
     }
     await q.edit_message_text(f"🛠 {prompts[act]}", parse_mode=ParseMode.HTML)
     await q.answer()
@@ -1592,6 +1658,9 @@ async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> 
 def _build_app():
     app = Application.builder().token(BOT_TOKEN).build()
     g = filters.ChatType.GROUPS
+
+    app.add_handler(MessageHandler(filters.ALL, ban_middleware), group=-500)
+    app.add_handler(CallbackQueryHandler(ban_callback_mw), group=-500)
 
     app.add_handler(MessageHandler(g, activation_mw), group=-300)
     app.add_handler(MessageHandler(g, guard_muted_messages), group=-100)
