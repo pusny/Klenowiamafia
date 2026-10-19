@@ -1456,7 +1456,6 @@ async def cb_coin_resolve(update, ctx):
     chance = int(db_get_setting("coin_chance", "45"))
     won = random.randint(1, 100) <= chance
     
-    # ИСПРАВЛЕНИЕ ЛОГИКИ
     if won:
         result_side = "Орел" if choice == "heads" else "Решка"
         win = bet * 2
@@ -1489,7 +1488,6 @@ async def cb_dice_resolve(update, ctx):
     chance = int(db_get_setting("dice_chance", "16"))
     won = random.randint(1, 100) <= chance
     
-    # ИСПРАВЛЕНИЕ ЛОГИКИ
     if won:
         result_num = choice
         win = bet * 5
@@ -1591,12 +1589,17 @@ async def cb_croc_new(update, ctx):
     if q.message.chat.id in CROC_GAME: 
         return await q.answer("Слово уже загадано!", show_alert=True)
         
+    awaiting_users = [u for u, c in CROC_AWAITING.items() if c == q.message.chat.id]
+    if awaiting_users:
+        return await q.answer("Кто-то уже загадывает слово, подожди.", show_alert=True)
+        
     CROC_AWAITING[q.from_user.id] = q.message.chat.id
     await q.answer("Напиши мне в ЛС слово и описание!", show_alert=True)
     try: 
         await ctx.bot.send_message(q.from_user.id, "🐊 Отправь: <code>Слово | Описание</code>", parse_mode=ParseMode.HTML)
     except Exception: 
-        pass
+        CROC_AWAITING.pop(q.from_user.id, None)
+        await q.answer("Сначала нажми /start в ЛС бота!", show_alert=True)
 
 async def croc_guess_mw(update, ctx):
     msg = update.effective_message
