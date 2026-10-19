@@ -481,11 +481,6 @@ async def cmd_dm_start(update, ctx):
     if msg:
         await msg.reply_text(_menu_text(msg.from_user.id, msg.from_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(msg.from_user.id))
 
-async def cmd_dm_menu(update, ctx):
-    msg = update.effective_message
-    if msg:
-        await msg.reply_text(_menu_text(msg.from_user.id, msg.from_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(msg.from_user.id))
-
 async def cmd_dm_other(update, ctx):
     msg = update.effective_message
     uid = update.effective_user.id
@@ -1547,7 +1542,6 @@ def _build_app():
     app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(CROCODILE_STOP_REGEX), cmd_crocodile_stop))
 
     app.add_handler(CommandHandler("start", cmd_dm_start, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("menu", cmd_dm_menu, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, cmd_dm_other))
 
     app.add_handler(CallbackQueryHandler(cb_start_count, pattern=r"^ms:"))
@@ -1593,6 +1587,7 @@ def _build_app():
 async def _run_bot():
     app = _build_app()
     await app.initialize()
+    await app.bot.set_my_commands([])
     await app.start()
     await app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     await asyncio.Event().wait()
