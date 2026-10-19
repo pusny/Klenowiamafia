@@ -141,7 +141,6 @@ ADMIN_STATE = {}
 CASINO_AWAITING = set()
 ACTIVE_BETS = {}
 GAMES = {}
-PENDING_MSG = {}
 
 
 def _init_db():
@@ -433,8 +432,7 @@ async def on_bot_added(update, ctx):
     set_pending_key(cm.chat.id, key)
     
     log.warning("=== KEY: %s for chat %s (%s) ===", key, cm.chat.title, cm.chat.id)
-    sent = await ctx.bot.send_message(cm.chat.id, "🍁 Для активации введите:\n<code>активация КЛЮЧ</code>", parse_mode=ParseMode.HTML)
-    PENDING_MSG[cm.chat.id] = sent.message_id
+    await ctx.bot.send_message(cm.chat.id, "🍁 Для активации введите:\n<code>активация КЛЮЧ</code>", parse_mode=ParseMode.HTML)
 
 async def cmd_activate(update, ctx):
     msg = update.effective_message
@@ -455,19 +453,7 @@ async def cmd_activate(update, ctx):
     if parts[1].strip().upper() == (get_pending_key(msg.chat.id) or "").upper():
         activate_chat(msg.chat.id)
         clear_pending_key(msg.chat.id)
-        
-        try: await msg.delete()
-        except Exception: pass
-        
-        pm_id = PENDING_MSG.pop(msg.chat.id, None)
-        if pm_id:
-            try: await ctx.bot.delete_message(chat_id=msg.chat.id, message_id=pm_id)
-            except Exception: pass
-            
-        ans = await ctx.bot.send_message(msg.chat.id, "✅ Чат активирован!")
-        await asyncio.sleep(5)
-        try: await ans.delete()
-        except Exception: pass
+        await msg.reply_text("✅ Чат активирован!")
 
 async def guard_muted_messages(update, ctx):
     msg = update.effective_message
@@ -528,7 +514,9 @@ async def cmd_dm_other(update, ctx):
                 target, lvl = int(parts[0].replace("@", "")), int(parts[1])
                 db_save_user(target, level=lvl)
                 _check_level_achievements(target)
-                await msg.reply_text(f"✅ Выдан уровень {lvl} юзеру {target}", reply_markup=_menu_main_kb(uid))
+                u_new = db_get_user(target)
+                await msg.reply_text(f"✅ Установлен уровень {lvl} юзеру {target}\n<i>(Фактический уровень: {u_new['level']})</i>", parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
+                await _safe_send(ctx.bot, target, f"⭐ <b>Уведомление</b>\n\nТвой уровень изменен на <b>{u_new['level']}</b>!", parse_mode=ParseMode.HTML)
             elif action == "give_title" and len(parts) >= 2:
                 target = int(parts[0].replace("@", ""))
                 title = " ".join(parts[1:])
@@ -537,6 +525,36 @@ async def cmd_dm_other(update, ctx):
                     u['unlocked_titles'].append(title)
                 db_save_user(target, title=title, unlocked_titles=u['unlocked_titles'])
                 await msg.reply_text(f"✅ Выдан титул '{title}' юзеру {target}", reply_markup=_menu_main_kb(uid))
+                await _safe_send(ctx.bot, target, f"👑 <b>Уведомление</b>\n\nТебе выдан титул <b>{title}</b> и установлен!", parse_mode=ParseMode.HTML)
+            elif action == "take_title" and len(parts) >= 2:
+                target = int(parts[0].replace("@", ""))
+                title = " ".join(parts[1:])
+                u = db_get_user(target)
+                if title in u['unlocked_titles']:
+                    u['unlocked_titles'].remove(title)
+                if u['title'] == title:
+                    u['title'] = "Новичок"
+                db_save_user(target, title=u['title'], unlocked_titles=u['unlocked_titles'])
+                await msg.reply_text(f"✅ Забран титул '{title}' у юзера {target}", reply_markup=_menu_main_kb(uid))
+                await _safe_send(ctx.bot, target, f"🚫 <b>Уведомление</b>\n\nУ тебя забран титул <b>{title}</b>.", parse_mode=ParseMode.HTML)
+            elif action == "view_profile" and len(parts) >= 1:
+                target = int(parts[0].replace("@", ""))
+                u = db_get_user(target)
+                total_xp = u['wins'] * 2 + u['games'] + u['croc_wins']
+                inv_str = ", ".join([f"{SHOP_ITEMS[k]['emoji']} {SHOP_ITEMS[k]['name']} x{v}" for k, v in u['inventory'].items() if k in SHOP_ITEMS]) or "Пусто"
+                ach_str = ", ".join([ALL_ACHIEVEMENTS.get(a, a) for a in u['achievements']]) or "Нет"
+                
+                text = (f"👤 <b>Профиль юзера</b> <code>{target}</code>\n"
+                        f"Имя: <b>{html.escape(u['username'] or 'Аноним')}</b>\n\n"
+                        f"🍁 Баланс: <b>{u['coins']}🍁</b>\n"
+                        f"⭐ Уровень: <b>{u['level']}</b> (XP: {total_xp}/{u['level']*5})\n"
+                        f"👑 Титул: <b>{u['title']}</b>\n"
+                        f"🏆 Побед: <b>{u['wins']}</b> / Игр: <b>{u['games']}</b>\n"
+                        f"🐊 Крокодил: <b>{u['croc_wins']}</b>\n\n"
+                        f"🎒 Инвентарь: {inv_str}\n\n"
+                        f"🏅 Достижения ({len(u['achievements'])}): {ach_str}")
+                
+                await msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
             elif action.startswith("casino_chance_"):
                 game = action.split("_")[-1]
                 chance = int(parts[0])
@@ -1436,8 +1454,10 @@ async def cb_admin_main(update, ctx):
     
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🍁 Выдать/Списать листики", callback_data="admin:act:give_coins")],
-        [InlineKeyboardButton("⭐ Выдать уровень", callback_data="admin:act:give_level")],
+        [InlineKeyboardButton("⭐ Изменить уровень", callback_data="admin:act:give_level")],
         [InlineKeyboardButton("👑 Выдать титул", callback_data="admin:act:give_title")],
+        [InlineKeyboardButton("🚫 Забрать титул", callback_data="admin:act:take_title")],
+        [InlineKeyboardButton("🔍 Профиль юзера", callback_data="admin:act:view_profile")],
         [InlineKeyboardButton("🎰 Настройки Казино", callback_data="admin:casino")],
         [InlineKeyboardButton("👥 Список юзеров", callback_data="admin:users")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu:main:0")]
@@ -1451,8 +1471,10 @@ async def cb_admin_act(update, ctx):
     ADMIN_STATE[q.from_user.id] = act
     prompts = {
         "give_coins": "Отправь: <code>ID количество</code>\n<i>(чтобы списать, напиши с минусом, например -100)</i>",
-        "give_level": "Отправь: <code>ID уровень</code>",
-        "give_title": "Отправь: <code>ID Титул</code>"
+        "give_level": "Отправь: <code>ID уровень</code>\n<i>(учти, что уровень не может быть ниже заработанного)</i>",
+        "give_title": "Отправь: <code>ID Титул</code>",
+        "take_title": "Отправь: <code>ID Титул</code>",
+        "view_profile": "Отправь: <code>ID юзера</code>"
     }
     await q.edit_message_text(f"🛠 {prompts[act]}", parse_mode=ParseMode.HTML)
     await q.answer()
