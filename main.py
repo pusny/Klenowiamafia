@@ -2898,7 +2898,7 @@ def _build_app():
     app = (
         Application.builder()
         .token(BOT_TOKEN)
-        .rate_limiter(AIORateLimiter(max_rate=25, time_period=1))
+        .rate_limiter(AIORateLimiter(overall_max_rate=25, overall_time_period=1))
         .build()
     )
     g = filters.ChatType.GROUPS
