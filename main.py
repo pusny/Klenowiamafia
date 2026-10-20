@@ -72,20 +72,20 @@ ROLE_DISTRIBUTION = {
 
 SHOP_ITEMS = {
     "amulet":{"name":"Оберег","emoji":"🛡","price":75,"desc":"Защита от убийства ночью","modes":("now","match"),"cat":"game"},
-    "blind":{"name":"Отвод глаз","emoji":"👁‍🗨","price":60,"desc":"Защита от голосования","modes":("now","match"),"cat":"game"},
-    "fake":{"name":"Фальшивка","emoji":"📄","price":100,"desc":"Смотритель видит вас жителем","modes":("now","match"),"cat":"game"},
+    "blind":{"name":"Отвод глаз","emoji":"👁‍🗨","price":60,"desc":"Защита от голосования днём","modes":("now","match"),"cat":"game"},
+    "fake":{"name":"Фальшивка","emoji":"📄","price":100,"desc":"Смотритель видит вас как жителя","modes":("now","match"),"cat":"game"},
     "cookie":{"name":"Печенье","emoji":"🍪","price":40,"desc":"Узнать роль случайного игрока","modes":("now",),"cat":"game"},
-    "double_vote":{"name":"Двойной голос","emoji":"🎯","price":200,"desc":"Голос ×2","modes":("now","match"),"cat":"active"},
-    "bomb":{"name":"Бомба","emoji":"💣","price":250,"desc":"Забрать с собой при казни","modes":("now","match"),"cat":"active"},
-    "antidote":{"name":"Противоядие","emoji":"💊","price":50,"desc":"Снять молчание","modes":("now",),"cat":"active"},
+    "double_vote":{"name":"Двойной голос","emoji":"🎯","price":200,"desc":"Твой голос на дневном голосовании считается за два","modes":("now","match"),"cat":"active"},
+    "bomb":{"name":"Бомба","emoji":"💣","price":250,"desc":"Если тебя казнят, заберёшь с собой случайного голосовавшего против тебя","modes":("now","match"),"cat":"active"},
+    "antidote":{"name":"Противоядие","emoji":"💊","price":50,"desc":"Мгновенно снимает эффект молчания","modes":("now",),"cat":"active"},
     "case_wood":{"name":"Деревянный кейс","emoji":"📦","price":50,"desc":"Шанс 45%. Выигрыш до 80🍁!","modes":("now",),"cat":"misc"},
     "case_silver":{"name":"Серебряный кейс","emoji":"🎁","price":200,"desc":"Шанс 45%. Выигрыш до 300🍁!","modes":("now",),"cat":"misc"},
     "case_gold":{"name":"Золотой кейс","emoji":"💎","price":1000,"desc":"Шанс 45%. Выигрыш до 2000🍁!","modes":("now",),"cat":"misc"},
-    "custom_title":{"name":"Свой титул","emoji":"🎨","price":2000,"desc":"Свой текст в титул (15 симв)","modes":("now",),"cat":"misc"},
-    "bait_advanced":{"name":"Улучшенная наживка x10","emoji":"🐛","price":300,"desc":"10 шт. Сапог реже","modes":("now",),"cat":"fish"},
-    "bait_luxury":{"name":"Премиум наживка x10","emoji":"🦐","price":800,"desc":"10 шт. Редкий улов чаще","modes":("now",),"cat":"fish"},
-    "dungeon_potion":{"name":"Зелье удачи","emoji":"🧪","price":150,"desc":"+25% к успеху в след. походе","modes":("now",),"cat":"dungeon"},
-    "dungeon_charm":{"name":"Амулет охотника","emoji":"🧿","price":400,"desc":"+50% к успеху в след. походе","modes":("now",),"cat":"dungeon"},
+    "custom_title":{"name":"Свой титул","emoji":"🎨","price":2000,"desc":"Свой текст в титул (до 15 символов)","modes":("now",),"cat":"misc"},
+    "bait_advanced":{"name":"Улучшенная наживка x10","emoji":"🐛","price":300,"desc":"10 шт. Сапог реже (15%), редкая рыба чаще","modes":("now",),"cat":"fish"},
+    "bait_luxury":{"name":"Премиум наживка x10","emoji":"🦐","price":800,"desc":"10 шт. Сапог 5%, редкий улов чаще","modes":("now",),"cat":"fish"},
+    "dungeon_potion":{"name":"Зелье удачи","emoji":"🧪","price":150,"desc":"+25% к успеху в следующем походе","modes":("now",),"cat":"dungeon"},
+    "dungeon_charm":{"name":"Амулет охотника","emoji":"🧿","price":400,"desc":"+50% к успеху в следующем походе","modes":("now",),"cat":"dungeon"},
 }
 
 TITLES_SHOP = {
@@ -159,9 +159,7 @@ def _init_db():
             );
         """)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(users_data)")}
-        for col, ddl in [
-            ("dungeon_bonus","INTEGER DEFAULT 0"),
-        ]:
+        for col, ddl in [("dungeon_bonus","INTEGER DEFAULT 0")]:
             if col not in cols:
                 conn.execute(f"ALTER TABLE users_data ADD COLUMN {col} {ddl}")
         defaults = [
@@ -1018,9 +1016,9 @@ async def cb_inv_use(update, ctx):
         if won:
             if random.randint(1, 100) <= item_drop_chance:
                 drops = {
-                    "case_wood": [("bait_advanced", 3, 60), ("bait_luxury", 1, 30), ("dungeon_potion", 1, 10)],
-                    "case_silver": [("bait_advanced", 5, 40), ("bait_luxury", 3, 30), ("dungeon_potion", 2, 20), ("dungeon_charm", 1, 10)],
-                    "case_gold": [("bait_advanced", 10, 30), ("bait_luxury", 5, 30), ("dungeon_potion", 3, 25), ("dungeon_charm", 2, 15)]
+                    "case_wood": [("bait_advanced", 3, 40), ("bait_luxury", 1, 20), ("dungeon_potion", 1, 40)],
+                    "case_silver": [("bait_advanced", 5, 30), ("bait_luxury", 3, 25), ("dungeon_potion", 2, 25), ("dungeon_charm", 1, 20)],
+                    "case_gold": [("bait_advanced", 10, 25), ("bait_luxury", 5, 25), ("dungeon_potion", 3, 25), ("dungeon_charm", 2, 25)]
                 }.get(iid, [])
                 r = random.randint(1, 100); cum = 0; drop_str = ""
                 for drop_id, qty, ch in drops:
@@ -1070,7 +1068,7 @@ async def cb_inv_use(update, ctx):
         return
     
     if iid in ("bait_advanced", "bait_luxury"):
-        return await q.answer("Используй в рыбалке")
+        return await q.answer("Используй в рыбалке напрямую", show_alert=True)
     
     if iid in ("dungeon_potion", "dungeon_charm"):
         u['inventory'][iid] -= 1
@@ -1333,20 +1331,30 @@ async def cb_fish_main(update, ctx):
     except Exception: chat_id = 0
     u = db_get_user(q.from_user.id, q.from_user)
     now = time.time(); cd = max(0, u['fish_cd'] - now)
-    adv = u['inventory'].get('bait_advanced', 0); lux = u['inventory'].get('bait_luxury', 0)
-    text = f"🎣 <b>Рыбалка</b>\n\nУдочка: Ур. {u['fish_rod']}\n🪱 {u['fish_bait']} | 🐛 {adv} | 🦐 {lux}\nПоймано: {u['fish_caught']}\n\n"
+    adv = u['inventory'].get('bait_advanced', 0)
+    lux = u['inventory'].get('bait_luxury', 0)
+    text = (f"🎣 <b>Осеннее Озеро</b>\n\n"
+            f"Удочка: <b>Ур. {u['fish_rod']}</b>\n"
+            f"🪱 Обычная: <b>{u['fish_bait']}</b> шт.\n"
+            f"🐛 Улучшенная: <b>{adv}</b> шт.\n"
+            f"🦐 Премиум: <b>{lux}</b> шт.\n"
+            f"Поймано рыбы: <b>{u['fish_caught']}</b> шт.\n\n")
     rows = []
-    if cd > 0: text += f"⏳ Кд: {int(cd)} сек"
+    if cd > 0:
+        text += f"⏳ Отдых после заброса: <b>{int(cd)} сек.</b>"
     else:
-        if u['fish_bait'] > 0: rows.append([InlineKeyboardButton(f"🎣 Заброс (🪱 x{u['fish_bait']})", callback_data=f"fish:cast:{chat_id}:basic")])
-        if adv > 0: rows.append([InlineKeyboardButton(f"🎣 Заброс (🐛 x{adv})", callback_data=f"fish:cast:{chat_id}:advanced")])
-        if lux > 0: rows.append([InlineKeyboardButton(f"🎣 Заброс (🦐 x{lux})", callback_data=f"fish:cast:{chat_id}:luxury")])
-        if not (u['fish_bait'] or adv or lux): text += "❗ Купи наживку"
+        text += "🌊 Озеро спокойно. Можно забрасывать."
+        if u['fish_bait'] > 0:
+            rows.append([InlineKeyboardButton(f"🎣 Заброс (🪱 обычная, x{u['fish_bait']})", callback_data=f"fish:cast:{chat_id}:basic")])
+        if adv > 0:
+            rows.append([InlineKeyboardButton(f"🎣 Заброс (🐛 улучшенная, x{adv})", callback_data=f"fish:cast:{chat_id}:advanced")])
+        if lux > 0:
+            rows.append([InlineKeyboardButton(f"🎣 Заброс (🦐 премиум, x{lux})", callback_data=f"fish:cast:{chat_id}:luxury")])
+        if not (u['fish_bait'] or adv or lux):
+            text += "\n\n❗ Купи наживку"
     rows.append([InlineKeyboardButton("🪱 Купить обычную (10 шт / 100🍁)", callback_data=f"fish:buy_bait:{chat_id}")])
-    rows.append([InlineKeyboardButton("🐛 Улучшенная (10 шт / 300🍁)", callback_data=f"fish:buy_adv:{chat_id}")])
-    rows.append([InlineKeyboardButton("🦐 Премиум (10 шт / 800🍁)", callback_data=f"fish:buy_lux:{chat_id}")])
     price = u['fish_rod'] * 500
-    rows.append([InlineKeyboardButton(f"⚙️ Удочка → Ур. {u['fish_rod']+1} ({price}🍁)", callback_data=f"fish:upgrade:{chat_id}")])
+    rows.append([InlineKeyboardButton(f"⚙️ Улучшить удочку (Ур. {u['fish_rod']+1} / {price}🍁)", callback_data=f"fish:upgrade:{chat_id}")])
     rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")])
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
     await q.answer()
@@ -1357,11 +1365,17 @@ async def cb_fish_cast(update, ctx):
     parts = q.data.split(":")
     chat_id, bait_type = int(parts[2]), parts[3]
     u = db_get_user(q.from_user.id, q.from_user)
-    if time.time() < u['fish_cd']: return await q.answer("Кд", show_alert=True)
+    if time.time() < u['fish_cd']: return await q.answer("Рано", show_alert=True)
     if bait_type == "basic":
         if u['fish_bait'] <= 0: return await q.answer("Нет обычной", show_alert=True)
         u['fish_bait'] -= 1
-        c_boot, c_leaf, c_carp, c_perch, c_chest, c_key, c_pearl = 30, 30, 20, 12, 5, 2, 1
+        c_boot = int(db_get_setting("fish_chance_boot", "30"))
+        c_leaf = int(db_get_setting("fish_chance_leaf", "30"))
+        c_carp = int(db_get_setting("fish_chance_carp", "20"))
+        c_perch = int(db_get_setting("fish_chance_perch", "12"))
+        c_chest = int(db_get_setting("fish_chance_chest", "5"))
+        c_key = int(db_get_setting("fish_chance_key", "2"))
+        c_pearl = int(db_get_setting("fish_chance_pearl", "1"))
     elif bait_type == "advanced":
         if u['inventory'].get('bait_advanced', 0) <= 0: return await q.answer("Нет улучшенной", show_alert=True)
         u['inventory']['bait_advanced'] -= 1
@@ -1374,12 +1388,17 @@ async def cb_fish_cast(update, ctx):
         c_boot, c_leaf, c_carp, c_perch, c_chest, c_key, c_pearl = 5, 10, 30, 25, 15, 7, 8
     u['fish_cd'] = time.time() + 600
     roll = random.randint(1, 100)
+    rod = u['fish_rod']
     r_leaf = int(db_get_setting("fish_reward_leaf", "1"))
     r_carp = int(db_get_setting("fish_reward_carp", "3"))
     r_perch = int(db_get_setting("fish_reward_perch", "6"))
     r_chest = int(db_get_setting("fish_reward_chest", "15"))
     r_key = int(db_get_setting("fish_reward_key", "40"))
     r_pearl = int(db_get_setting("fish_reward_pearl", "100"))
+    if bait_type == "basic":
+        rod_bonus = (rod - 1) * 3
+        c_boot = max(10, c_boot - rod_bonus)
+        c_leaf = max(10, c_leaf - rod_bonus//2)
     if roll <= c_boot: loot, reward = "🗑 Старый сапог", 0
     elif roll <= c_boot + c_leaf: loot, reward = "🍂 Осенний лист", r_leaf
     elif roll <= c_boot + c_leaf + c_carp: loot, reward = "🐟 Кленовый карась", r_carp
@@ -1393,10 +1412,10 @@ async def cb_fish_cast(update, ctx):
     _check_rich_achievements(q.from_user.id); _check_mini_game_achievements(q.from_user.id)
     if reward > 0:
         await q.answer(f"{loot}!")
-        text = f"🎣 {loot}\n+<b>{reward}🍁</b>\nБаланс: {_balance_str(u['coins'])}\nВсего: {u['fish_caught']}"
+        text = f"🎣 <b>Улов:</b>\n\n{loot}\nНаграда: <b>+{reward}🍁</b>\nТвой баланс: {_balance_str(u['coins'])}\n\nВсего поймано: <b>{u['fish_caught']}</b>"
     else:
         await q.answer(f"{loot}")
-        text = f"💀 {loot}\nБаланс: {_balance_str(u['coins'])}\nВсего: {u['fish_caught']}"
+        text = f"💀 <b>Неудача...</b>\n\nТы вытащил {loot}, но ничего не поймал.\n\nТвой баланс: {_balance_str(u['coins'])}\nВсего поймано: <b>{u['fish_caught']}</b>"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Рыбалка", callback_data=f"fish:main:{chat_id}")]])
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
 
@@ -1409,33 +1428,7 @@ async def cb_fish_buy_bait(update, ctx):
     if u['coins'] < 100: return await q.answer("Мало", show_alert=True)
     u['coins'] -= 100; u['fish_bait'] += 10
     db_save_user(q.from_user.id, **u)
-    await q.answer("+10 обычных")
-    await cb_fish_main(update, ctx)
-
-async def cb_fish_buy_adv(update, ctx):
-    q = update.callback_query
-    if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except Exception: chat_id = 0
-    u = db_get_user(q.from_user.id, q.from_user)
-    if u['coins'] < 300: return await q.answer("Мало (300)", show_alert=True)
-    u['coins'] -= 300
-    u['inventory']['bait_advanced'] = u['inventory'].get('bait_advanced', 0) + 10
-    db_save_user(q.from_user.id, **u)
-    await q.answer("+10 улучшенных")
-    await cb_fish_main(update, ctx)
-
-async def cb_fish_buy_lux(update, ctx):
-    q = update.callback_query
-    if not q: return
-    try: chat_id = int(q.data.split(":")[2])
-    except Exception: chat_id = 0
-    u = db_get_user(q.from_user.id, q.from_user)
-    if u['coins'] < 800: return await q.answer("Мало (800)", show_alert=True)
-    u['coins'] -= 800
-    u['inventory']['bait_luxury'] = u['inventory'].get('bait_luxury', 0) + 10
-    db_save_user(q.from_user.id, **u)
-    await q.answer("+10 премиум")
+    await q.answer("+10 наживок")
     await cb_fish_main(update, ctx)
 
 async def cb_fish_upgrade(update, ctx):
@@ -1530,9 +1523,9 @@ async def cb_dungeon_start(update, ctx):
         loot_item, loot_mult = random.choice(loot_table)
         reward = random.randint(reward_min, reward_max) * power * loot_mult
         u['coins'] += reward
-        msg = f"⚔️ <b>Успех!</b>\n\n{loot_item}\n+<b>{reward}🍁</b>\nБаланс: {_balance_str(u['coins'])}\nПоходов: {u['dungeon_runs']}"
+        msg = f"⚔️ <b>Успех!</b>\n\nГерой вернулся с ресурсом: <b>{loot_item}</b>!\nДобыча: <b>+{reward}🍁</b>!\n\nТвой баланс: {_balance_str(u['coins'])}\nВсего походов: <b>{u['dungeon_runs']}</b>"
     else:
-        msg = f"💀 <b>Поражение</b>\n\nНичего не выпало.\nБаланс: {_balance_str(u['coins'])}\nПоходов: {u['dungeon_runs']}"
+        msg = f"💀 <b>Поражение...</b>\n\nГерой не справился с монстрами. Вы ничего не получили.\n\nТвой баланс: {_balance_str(u['coins'])}\nВсего походов: <b>{u['dungeon_runs']}</b>"
     db_save_user(q.from_user.id, **u)
     _check_rich_achievements(q.from_user.id); _check_mini_game_achievements(q.from_user.id)
     await q.answer("Готово")
@@ -1930,8 +1923,6 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_fish_main, pattern=r"^fish:main:"))
     app.add_handler(CallbackQueryHandler(cb_fish_cast, pattern=r"^fish:cast:"))
     app.add_handler(CallbackQueryHandler(cb_fish_buy_bait, pattern=r"^fish:buy_bait:"))
-    app.add_handler(CallbackQueryHandler(cb_fish_buy_adv, pattern=r"^fish:buy_adv:"))
-    app.add_handler(CallbackQueryHandler(cb_fish_buy_lux, pattern=r"^fish:buy_lux:"))
     app.add_handler(CallbackQueryHandler(cb_fish_upgrade, pattern=r"^fish:upgrade:"))
     app.add_handler(CallbackQueryHandler(cb_dungeon_main, pattern=r"^dungeon:main:"))
     app.add_handler(CallbackQueryHandler(cb_dungeon_use_potion, pattern=r"^dungeon:use_potion:"))
