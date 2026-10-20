@@ -20,7 +20,8 @@ from telegram.constants import ParseMode
 from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import (
     Application, ApplicationHandlerStop, CallbackQueryHandler,
-    ChatMemberHandler, CommandHandler, MessageHandler, filters, ContextTypes
+    ChatMemberHandler, CommandHandler, MessageHandler, filters, ContextTypes,
+    AIORateLimiter
 )
 
 load_dotenv()
@@ -182,9 +183,10 @@ GAMES = {}
 
 
 def _init_db():
-    with sqlite3.connect(DB_PATH, timeout=15.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=10000")
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS activations (chat_id INTEGER PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS pending_activations (chat_id INTEGER PRIMARY KEY, key TEXT NOT NULL);
@@ -344,31 +346,31 @@ def _init_db():
 _init_db()
 
 def is_user_banned(uid):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         return conn.execute("SELECT 1 FROM bans WHERE user_id=?", (uid,)).fetchone() is not None
 
 def ban_user(uid):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.execute("INSERT OR IGNORE INTO bans (user_id) VALUES (?)", (uid,))
         conn.commit()
 
 def unban_user(uid):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.execute("DELETE FROM bans WHERE user_id=?", (uid,))
         conn.commit()
 
 def db_get_setting(key, default=""):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         row = conn.execute("SELECT value FROM bot_settings WHERE key=?", (key,)).fetchone()
         return row[0] if row else default
 
 def db_set_setting(key, value):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, str(value)))
         conn.commit()
 
 def db_get_user(user_id, tg_user=None):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM users_data WHERE user_id=?", (user_id,)).fetchone()
         if not row:
@@ -426,7 +428,7 @@ def db_save_user(uid, **kwargs):
     for k, v in kwargs.items():
         if k in u:
             u[k] = v
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.execute("""
             UPDATE users_data SET 
                 username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?, croc_wins=?, mafia_wins=?, city_wins=?,
@@ -527,26 +529,26 @@ def _check_mini_game_achievements(uid):
         db_save_user(uid, achievements=u['achievements'])
 
 def is_chat_activated(chat_id):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         return conn.execute("SELECT 1 FROM activations WHERE chat_id=?", (chat_id,)).fetchone() is not None
 
 def activate_chat(chat_id):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.execute("INSERT OR IGNORE INTO activations (chat_id) VALUES (?)", (chat_id,))
         conn.commit()
 
 def get_pending_key(chat_id):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         row = conn.execute("SELECT key FROM pending_activations WHERE chat_id=?", (chat_id,)).fetchone()
         return row[0] if row else None
 
 def set_pending_key(chat_id, key):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.execute("INSERT OR REPLACE INTO pending_activations (chat_id, key) VALUES (?, ?)", (chat_id, key))
         conn.commit()
 
 def clear_pending_key(chat_id):
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.execute("DELETE FROM pending_activations WHERE chat_id=?", (chat_id,))
         conn.commit()
 
@@ -2413,7 +2415,7 @@ async def cb_menu_top_coins(update, ctx):
     try: chat_id = int(q.data.split(":")[2])
     except Exception: chat_id = 0
     
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT user_id, username, coins, title, pet_name, pet_level FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
         
@@ -2439,7 +2441,7 @@ async def cb_menu_top_level(update, ctx):
     try: chat_id = int(q.data.split(":")[2])
     except Exception: chat_id = 0
     
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT user_id, username, level, title, pet_name, pet_level FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
         
@@ -2465,7 +2467,7 @@ async def cb_menu_top_farm(update, ctx):
     try: chat_id = int(q.data.split(":")[2])
     except Exception: chat_id = 0
     
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT user_id, username, farm_harvests, title FROM users_data WHERE farm_harvests > 0 ORDER BY farm_harvests DESC LIMIT 5").fetchall()
         
@@ -2487,7 +2489,7 @@ async def cb_menu_top_fish(update, ctx):
     try: chat_id = int(q.data.split(":")[2])
     except Exception: chat_id = 0
     
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT user_id, username, fish_caught, title FROM users_data WHERE fish_caught > 0 ORDER BY fish_caught DESC LIMIT 5").fetchall()
         
@@ -2509,7 +2511,7 @@ async def cb_menu_top_dung(update, ctx):
     try: chat_id = int(q.data.split(":")[2])
     except Exception: chat_id = 0
     
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT user_id, username, dungeon_runs, title FROM users_data WHERE dungeon_runs > 0 ORDER BY dungeon_runs DESC LIMIT 5").fetchall()
         
@@ -2772,7 +2774,7 @@ async def cb_admin_act(update, ctx):
 
 async def cb_admin_users(update, ctx):
     q = update.callback_query
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT user_id, username, level FROM users_data").fetchall()
     lines = ["👥 <b>Юзеры:</b>"]
@@ -2880,7 +2882,12 @@ async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 def _build_app():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .rate_limiter(AIORateLimiter(max_rate=25, time_period=1))
+        .build()
+    )
     g = filters.ChatType.GROUPS
 
     app.add_handler(MessageHandler(filters.ALL, ban_middleware), group=-500)
