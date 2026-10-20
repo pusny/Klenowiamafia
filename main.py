@@ -110,6 +110,9 @@ TITLES_SHOP = {
     "donater": {"name": "Меценат", "emoji": "💎", "price": 1500, "ach_req": 0, "daily_bonus": 70},
     "godfather": {"name": "Крестный отец", "emoji": "🎩", "price": 2000, "ach_req": 0, "daily_bonus": 90},
     "rich_boy": {"name": "Золотой Скрудж", "emoji": "💰", "price": 3000, "ach_req": 0, "daily_bonus": 120},
+    "farmer": {"name": "Фермер", "emoji": "🌾", "price": 0, "ach_req": 8, "daily_bonus": 60},
+    "fisher": {"name": "Рыбак", "emoji": "🎣", "price": 0, "ach_req": 12, "daily_bonus": 80},
+    "dungeoner": {"name": "Странник", "emoji": "⚔️", "price": 0, "ach_req": 16, "daily_bonus": 100},
     "detective": {"name": "Детектив", "emoji": "🕵️", "price": 0, "ach_req": 5, "daily_bonus": 30},
     "sheriff": {"name": "Шериф", "emoji": "🤠", "price": 0, "ach_req": 8, "daily_bonus": 40},
     "veteran": {"name": "Ветеран", "emoji": "🎖", "price": 0, "ach_req": 10, "daily_bonus": 50},
@@ -148,7 +151,17 @@ ALL_ACHIEVEMENTS = {
     "level_20": "✨ Достигнут 20 уровень",
     "level_30": "💫 Достигнут 30 уровень",
     "level_50": "🌌 Достигнут 50 уровень",
-    "ach_10": "🎖 Собрано 10 достижений"
+    "farm_1": "🌾 Первый урожай",
+    "farm_10": "🌾 10 урожаев",
+    "farm_50": "🌾 50 урожаев",
+    "fish_1": "🐟 Первая рыбка",
+    "fish_10": "🐟 10 рыбок",
+    "fish_50": "🐟 50 рыбок",
+    "dung_1": "⚔️ Первый поход",
+    "dung_10": "⚔️ 10 походов",
+    "dung_50": "⚔️ 50 походов",
+    "ach_10": "🎖 Собрано 10 достижений",
+    "ach_20": "🏅 Собрано 20 достижений"
 }
 
 ACTIVATION_REGEX = re.compile(r"(?i)^(?:/)?(?:активация|activate)(?:\s+\S+)?$")
@@ -201,7 +214,10 @@ def _init_db():
                 pet_level INTEGER DEFAULT 1,
                 pet_hunger INTEGER DEFAULT 100,
                 pet_happy INTEGER DEFAULT 100,
-                pet_last_time REAL DEFAULT 0
+                pet_last_time REAL DEFAULT 0,
+                farm_harvests INTEGER DEFAULT 0,
+                fish_caught INTEGER DEFAULT 0,
+                dungeon_runs INTEGER DEFAULT 0
             );
         """)
         
@@ -240,6 +256,12 @@ def _init_db():
             conn.execute("ALTER TABLE users_data ADD COLUMN pet_happy INTEGER DEFAULT 100")
         if "pet_last_time" not in cols:
             conn.execute("ALTER TABLE users_data ADD COLUMN pet_last_time REAL DEFAULT 0")
+        if "farm_harvests" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN farm_harvests INTEGER DEFAULT 0")
+        if "fish_caught" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN fish_caught INTEGER DEFAULT 0")
+        if "dungeon_runs" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN dungeon_runs INTEGER DEFAULT 0")
             
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_chance', '60')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_max_win', '100')")
@@ -257,19 +279,29 @@ def _init_db():
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_mushroom_time', '300')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_mushroom_min', '100')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_mushroom_max', '200')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_pumpkin_time', '900')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_pumpkin_min', '400')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_pumpkin_max', '800')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_syrup_time', '1800')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_syrup_min', '500')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_syrup_max', '1000')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_sunflower_time', '3600')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_sunflower_min', '1500')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_sunflower_max', '3000')")
         
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_boot', '35')")
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_leaf', '40')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_boot', '30')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_leaf', '35')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_carp', '15')")
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_perch', '8')")
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_chest', '2')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_perch', '10')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_chest', '5')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_key', '3')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_pearl', '2')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_reward_leaf', '10')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_reward_carp', '50')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_reward_perch', '200')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_reward_chest', '500')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_reward_key', '1000')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_reward_pearl', '2500')")
         
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('dungeon_base_chance', '20')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('dungeon_mult_chance', '5')")
@@ -349,6 +381,9 @@ def db_get_user(user_id, tg_user=None):
         d['pet_hunger'] = int(d.get('pet_hunger') or 100)
         d['pet_happy'] = int(d.get('pet_happy') or 100)
         d['pet_last_time'] = float(d.get('pet_last_time') or 0.0)
+        d['farm_harvests'] = int(d.get('farm_harvests') or 0)
+        d['fish_caught'] = int(d.get('fish_caught') or 0)
+        d['dungeon_runs'] = int(d.get('dungeon_runs') or 0)
         
         total_xp = d['wins'] * 2 + d['games'] + d['croc_wins']
         calc_level = total_xp // 5 + 1
@@ -369,14 +404,16 @@ def db_save_user(uid, **kwargs):
             UPDATE users_data SET 
                 username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?, croc_wins=?, mafia_wins=?, city_wins=?,
                 farm_slots=?, farm_data=?, fish_rod=?, fish_bait=?, fish_cd=?, dungeon_weapon=?, dungeon_armor=?, dungeon_cd=?,
-                pet_name=?, pet_level=?, pet_hunger=?, pet_happy=?, pet_last_time=?
+                pet_name=?, pet_level=?, pet_hunger=?, pet_happy=?, pet_last_time=?,
+                farm_harvests=?, fish_caught=?, dungeon_runs=?
             WHERE user_id=?
         """, (
             u['username'], u['coins'], u['level'], u['title'], u['wins'], u['games'],
             json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'],
             u['croc_wins'], u['mafia_wins'], u['city_wins'],
             u['farm_slots'], json.dumps(u['farm_data']), u['fish_rod'], u['fish_bait'], u['fish_cd'], u['dungeon_weapon'], u['dungeon_armor'], u['dungeon_cd'],
-            u['pet_name'], u['pet_level'], u['pet_hunger'], u['pet_happy'], u['pet_last_time'], uid
+            u['pet_name'], u['pet_level'], u['pet_hunger'], u['pet_happy'], u['pet_last_time'],
+            u['farm_harvests'], u['fish_caught'], u['dungeon_runs'], uid
         ))
         conn.commit()
 
@@ -394,9 +431,6 @@ def _check_rich_achievements(uid):
         changed = True
     if u['coins'] >= 10000 and "rich_10000" not in u['achievements']:
         u['achievements'].append("rich_10000")
-        changed = True
-    if len(u['achievements']) >= 10 and "ach_10" not in u['achievements']:
-        u['achievements'].append("ach_10")
         changed = True
     if changed:
         db_save_user(uid, achievements=u['achievements'])
@@ -419,9 +453,49 @@ def _check_level_achievements(uid):
     if u['level'] >= 50 and "level_50" not in u['achievements']:
         u['achievements'].append("level_50")
         changed = True
+    if changed:
+        db_save_user(uid, achievements=u['achievements'])
+
+def _check_mini_game_achievements(uid):
+    u = db_get_user(uid)
+    changed = False
+    if u['farm_harvests'] >= 1 and "farm_1" not in u['achievements']:
+        u['achievements'].append("farm_1")
+        changed = True
+    if u['farm_harvests'] >= 10 and "farm_10" not in u['achievements']:
+        u['achievements'].append("farm_10")
+        changed = True
+    if u['farm_harvests'] >= 50 and "farm_50" not in u['achievements']:
+        u['achievements'].append("farm_50")
+        changed = True
+        
+    if u['fish_caught'] >= 1 and "fish_1" not in u['achievements']:
+        u['achievements'].append("fish_1")
+        changed = True
+    if u['fish_caught'] >= 10 and "fish_10" not in u['achievements']:
+        u['achievements'].append("fish_10")
+        changed = True
+    if u['fish_caught'] >= 50 and "fish_50" not in u['achievements']:
+        u['achievements'].append("fish_50")
+        changed = True
+        
+    if u['dungeon_runs'] >= 1 and "dung_1" not in u['achievements']:
+        u['achievements'].append("dung_1")
+        changed = True
+    if u['dungeon_runs'] >= 10 and "dung_10" not in u['achievements']:
+        u['achievements'].append("dung_10")
+        changed = True
+    if u['dungeon_runs'] >= 50 and "dung_50" not in u['achievements']:
+        u['achievements'].append("dung_50")
+        changed = True
+        
     if len(u['achievements']) >= 10 and "ach_10" not in u['achievements']:
         u['achievements'].append("ach_10")
         changed = True
+    if len(u['achievements']) >= 20 and "ach_20" not in u['achievements']:
+        u['achievements'].append("ach_20")
+        changed = True
+        
     if changed:
         db_save_user(uid, achievements=u['achievements'])
 
@@ -545,7 +619,7 @@ class Game:
 def _menu_main_kb(user_id, chat_id=0):
     rows = [
         [InlineKeyboardButton("👤 Профиль", callback_data=f"menu:profile:{chat_id}"), InlineKeyboardButton("🛒 Магазин", callback_data=f"menu:shop:{chat_id}")],
-        [InlineKeyboardButton("🎒 Инвентарь", callback_data=f"menu:inv:{chat_id}"), InlineKeyboardButton("🏆 Топ", callback_data=f"menu:top:{chat_id}")],
+        [InlineKeyboardButton("🎒 Инвентарь", callback_data=f"menu:inv:{chat_id}"), InlineKeyboardButton("🏆 Топы", callback_data=f"menu:top_menu:{chat_id}")],
         [InlineKeyboardButton("🏅 Достижения", callback_data=f"menu:ach:{chat_id}"), InlineKeyboardButton("🍁 Бонус", callback_data=f"menu:bonus:{chat_id}")],
         [InlineKeyboardButton("👑 Титулы", callback_data=f"menu:titles:{chat_id}"), InlineKeyboardButton("🐾 Питомец", callback_data=f"pet:main:{chat_id}")],
         [InlineKeyboardButton("🌾 Ферма", callback_data=f"farm:main:{chat_id}"), InlineKeyboardButton("🎣 Рыбалка", callback_data=f"fish:main:{chat_id}")],
@@ -1189,6 +1263,7 @@ async def _announce_end(bot, game):
         if new_lvl >= 50 and "level_50" not in u['achievements']: u['achievements'].append("level_50")
         
         if len(u['achievements']) >= 10 and "ach_10" not in u['achievements']: u['achievements'].append("ach_10")
+        if len(u['achievements']) >= 20 and "ach_20" not in u['achievements']: u['achievements'].append("ach_20")
         
         db_save_user(p.user_id, **u)
         
@@ -1760,12 +1835,16 @@ async def cb_farm_plant_menu(update, ctx):
     
     acorn_t = db_get_setting("farm_acorn_time", "60")
     mush_t = db_get_setting("farm_mushroom_time", "300")
+    pump_t = db_get_setting("farm_pumpkin_time", "900")
     syrup_t = db_get_setting("farm_syrup_time", "1800")
+    sun_t = db_get_setting("farm_sunflower_time", "3600")
     
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton(f"🌰 Желудь (10🍁) - {int(acorn_t)//60} мин", callback_data=f"farm:plant:{chat_id}:acorn")],
         [InlineKeyboardButton(f"🍄 Гриб (50🍁) - {int(mush_t)//60} мин", callback_data=f"farm:plant:{chat_id}:mushroom")],
+        [InlineKeyboardButton(f"🎃 Тыква (100🍁) - {int(pump_t)//60} мин", callback_data=f"farm:plant:{chat_id}:pumpkin")],
         [InlineKeyboardButton(f"🍁 Кленовый сироп (200🍁) - {int(syrup_t)//60} мин", callback_data=f"farm:plant:{chat_id}:syrup")],
+        [InlineKeyboardButton(f"🌻 Подсолнух (500🍁) - {int(sun_t)//60} мин", callback_data=f"farm:plant:{chat_id}:sunflower")],
         [InlineKeyboardButton("◀️ Назад", callback_data=f"farm:main:{chat_id}")]
     ])
     await q.edit_message_text("🌱 <b>Что посадим?</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -1783,7 +1862,9 @@ async def cb_farm_plant(update, ctx):
     seeds = {
         "acorn": {"name": "Желудь", "cost": 10, "time": int(db_get_setting("farm_acorn_time", "60")), "min_yield": int(db_get_setting("farm_acorn_min", "20")), "max_yield": int(db_get_setting("farm_acorn_max", "40"))},
         "mushroom": {"name": "Гриб", "cost": 50, "time": int(db_get_setting("farm_mushroom_time", "300")), "min_yield": int(db_get_setting("farm_mushroom_min", "100")), "max_yield": int(db_get_setting("farm_mushroom_max", "200"))},
-        "syrup": {"name": "Кленовый сироп", "cost": 200, "time": int(db_get_setting("farm_syrup_time", "1800")), "min_yield": int(db_get_setting("farm_syrup_min", "500")), "max_yield": int(db_get_setting("farm_syrup_max", "1000"))}
+        "pumpkin": {"name": "Тыква", "cost": 100, "time": int(db_get_setting("farm_pumpkin_time", "900")), "min_yield": int(db_get_setting("farm_pumpkin_min", "400")), "max_yield": int(db_get_setting("farm_pumpkin_max", "800"))},
+        "syrup": {"name": "Кленовый сироп", "cost": 200, "time": int(db_get_setting("farm_syrup_time", "1800")), "min_yield": int(db_get_setting("farm_syrup_min", "500")), "max_yield": int(db_get_setting("farm_syrup_max", "1000"))},
+        "sunflower": {"name": "Подсолнух", "cost": 500, "time": int(db_get_setting("farm_sunflower_time", "3600")), "min_yield": int(db_get_setting("farm_sunflower_min", "1500")), "max_yield": int(db_get_setting("farm_sunflower_max", "3000"))}
     }
     
     if seed_type not in seeds: return await q.answer("Неверный тип", show_alert=True)
@@ -1818,8 +1899,10 @@ async def cb_farm_harvest(update, ctx):
     reward = random.randint(crop['min_yield'], crop['max_yield'])
     u['coins'] += reward
     u['farm_data'].pop(idx)
+    u['farm_harvests'] += 1
     db_save_user(q.from_user.id, **u)
     _check_rich_achievements(q.from_user.id)
+    _check_mini_game_achievements(q.from_user.id)
     
     await q.answer(f"Собрано: +{reward}🍁!")
     await cb_farm_main(update, ctx)
@@ -1886,16 +1969,20 @@ async def cb_fish_cast(update, ctx):
     roll = random.randint(1, 100)
     rod = u['fish_rod']
     
-    c_boot = int(db_get_setting("fish_chance_boot", "35"))
-    c_leaf = int(db_get_setting("fish_chance_leaf", "40"))
+    c_boot = int(db_get_setting("fish_chance_boot", "30"))
+    c_leaf = int(db_get_setting("fish_chance_leaf", "35"))
     c_carp = int(db_get_setting("fish_chance_carp", "15"))
-    c_perch = int(db_get_setting("fish_chance_perch", "8"))
-    c_chest = int(db_get_setting("fish_chance_chest", "2"))
+    c_perch = int(db_get_setting("fish_chance_perch", "10"))
+    c_chest = int(db_get_setting("fish_chance_chest", "5"))
+    c_key = int(db_get_setting("fish_chance_key", "3"))
+    c_pearl = int(db_get_setting("fish_chance_pearl", "2"))
     
     r_leaf = int(db_get_setting("fish_reward_leaf", "10"))
     r_carp = int(db_get_setting("fish_reward_carp", "50"))
     r_perch = int(db_get_setting("fish_reward_perch", "200"))
     r_chest = int(db_get_setting("fish_reward_chest", "500"))
+    r_key = int(db_get_setting("fish_reward_key", "1000"))
+    r_pearl = int(db_get_setting("fish_reward_pearl", "2500"))
     
     rod_bonus = (rod - 1) * 3
     c_boot = max(5, c_boot - rod_bonus)
@@ -1913,13 +2000,23 @@ async def cb_fish_cast(update, ctx):
     elif roll <= c_boot + c_leaf + c_carp + c_perch:
         loot = "🐠 Золотой окунь"
         reward = r_perch
-    else:
+    elif roll <= c_boot + c_leaf + c_carp + c_perch + c_chest:
         loot = "📦 Затонувший сундук"
         reward = r_chest
+    elif roll <= c_boot + c_leaf + c_carp + c_perch + c_chest + c_key:
+        loot = "🔑 Ржавый ключ"
+        reward = r_key
+    else:
+        loot = "🦪 Жемчужина"
+        reward = r_pearl
         
     u['coins'] += reward
+    if reward > 0:
+        u['fish_caught'] += 1
+        
     db_save_user(q.from_user.id, **u)
     _check_rich_achievements(q.from_user.id)
+    _check_mini_game_achievements(q.from_user.id)
     
     await q.answer(f"Вы поймали: {loot}!")
     try:
@@ -2012,16 +2109,26 @@ async def cb_dungeon_start(update, ctx):
     won = random.randint(1, 100) <= success_chance
     
     u['dungeon_cd'] = time.time() + 21600
+    u['dungeon_runs'] += 1
     
     if won:
-        reward = random.randint(reward_min, reward_max) * power
+        loot_table = [
+            ("🪵 Древесина", 1),
+            ("⛓ Железо", 2),
+            ("💎 Кристалл", 3),
+            ("🏺 Древняя ваза", 5),
+            ("🗡 Артефакт", 10)
+        ]
+        loot_item, loot_mult = random.choice(loot_table)
+        reward = random.randint(reward_min, reward_max) * power * loot_mult
         u['coins'] += reward
-        msg = f"⚔️ <b>Успех!</b>\n\nГерой вернулся из Подземелья Листвы с добычей: <b>+{reward}🍁</b>!"
+        msg = f"⚔️ <b>Успех!</b>\n\nГерой вернулся из Подземелья Листвы с ресурсом: <b>{loot_item}</b>!\nДобыча: <b>+{reward}🍁</b>!"
     else:
         msg = f"💀 <b>Поражение...</b>\n\nГерой не справился с монстрами. Возвращается ни с чем."
         
     db_save_user(q.from_user.id, **u)
     _check_rich_achievements(q.from_user.id)
+    _check_mini_game_achievements(q.from_user.id)
     
     await q.answer("Поход завершен!")
     try:
@@ -2086,22 +2193,35 @@ async def cb_menu_bonus(update, ctx):
     await q.answer(f"+{bonus_amount}🍁")
     await q.edit_message_text(f"🍁 <b>Бонус</b> +{bonus_amount}🍁\nБаланс: {u['coins']}", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
 
-async def cb_menu_top(update, ctx):
+async def cb_menu_top_menu(update, ctx):
     q = update.callback_query
     if not q: return
-    try: 
-        chat_id = int(q.data.split(":")[2])
-    except Exception: 
-        chat_id = 0
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🍁 По листикам", callback_data=f"menu:top_coins:{chat_id}")],
+        [InlineKeyboardButton("⭐ По уровню", callback_data=f"menu:top_level:{chat_id}")],
+        [InlineKeyboardButton("🌾 Топ Фермеров", callback_data=f"menu:top_farm:{chat_id}")],
+        [InlineKeyboardButton("🎣 Топ Рыбаков", callback_data=f"menu:top_fish:{chat_id}")],
+        [InlineKeyboardButton("⚔️ Топ Подземельщиков", callback_data=f"menu:top_dung:{chat_id}")],
+        [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")]
+    ])
+    await q.edit_message_text("🏆 <b>Таблица лидеров</b>\n\nВыбери категорию:", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await q.answer()
+
+async def cb_menu_top_coins(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
     
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        rows_coins = conn.execute("SELECT user_id, username, coins, title FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
-        rows_level = conn.execute("SELECT user_id, username, level, title FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
+        rows = conn.execute("SELECT user_id, username, coins, title FROM users_data WHERE coins > 0 ORDER BY coins DESC LIMIT 5").fetchall()
         
     lines = ["🏆 <b>Топ по листикам:</b>", ""]
-    if rows_coins:
-        for i, r in enumerate(rows_coins, 1):
+    if rows:
+        for i, r in enumerate(rows, 1):
             uname = r['username']
             link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
             title_name = r['title'] or 'Новичок'
@@ -2110,10 +2230,22 @@ async def cb_menu_top(update, ctx):
     else:
         lines.append("Пока пусто.")
         
-    lines.append("\n⭐ <b>Топ по уровню:</b>")
-    lines.append("")
-    if rows_level:
-        for i, r in enumerate(rows_level, 1):
+    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data=f"menu:top_menu:{chat_id}")]]), link_preview_options=LinkPreviewOptions(is_disabled=True))
+    await q.answer()
+
+async def cb_menu_top_level(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT user_id, username, level, title FROM users_data WHERE level > 1 ORDER BY level DESC LIMIT 5").fetchall()
+        
+    lines = ["⭐ <b>Топ по уровню:</b>", ""]
+    if rows:
+        for i, r in enumerate(rows, 1):
             uname = r['username']
             link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
             title_name = r['title'] or 'Новичок'
@@ -2122,7 +2254,73 @@ async def cb_menu_top(update, ctx):
     else:
         lines.append("Пока пусто.")
         
-    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id), link_preview_options=LinkPreviewOptions(is_disabled=True))
+    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data=f"menu:top_menu:{chat_id}")]]), link_preview_options=LinkPreviewOptions(is_disabled=True))
+    await q.answer()
+
+async def cb_menu_top_farm(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT user_id, username, farm_harvests, title FROM users_data WHERE farm_harvests > 0 ORDER BY farm_harvests DESC LIMIT 5").fetchall()
+        
+    lines = ["🌾 <b>Топ Фермеров:</b>", ""]
+    if rows:
+        for i, r in enumerate(rows, 1):
+            uname = r['username']
+            link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
+            lines.append(f"{i}. {link} — {r['farm_harvests']} урожаев")
+    else:
+        lines.append("Пока пусто.")
+        
+    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data=f"menu:top_menu:{chat_id}")]]), link_preview_options=LinkPreviewOptions(is_disabled=True))
+    await q.answer()
+
+async def cb_menu_top_fish(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT user_id, username, fish_caught, title FROM users_data WHERE fish_caught > 0 ORDER BY fish_caught DESC LIMIT 5").fetchall()
+        
+    lines = ["🎣 <b>Топ Рыбаков:</b>", ""]
+    if rows:
+        for i, r in enumerate(rows, 1):
+            uname = r['username']
+            link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
+            lines.append(f"{i}. {link} — {r['fish_caught']} рыбок")
+    else:
+        lines.append("Пока пусто.")
+        
+    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data=f"menu:top_menu:{chat_id}")]]), link_preview_options=LinkPreviewOptions(is_disabled=True))
+    await q.answer()
+
+async def cb_menu_top_dung(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT user_id, username, dungeon_runs, title FROM users_data WHERE dungeon_runs > 0 ORDER BY dungeon_runs DESC LIMIT 5").fetchall()
+        
+    lines = ["⚔️ <b>Топ Подземельщиков:</b>", ""]
+    if rows:
+        for i, r in enumerate(rows, 1):
+            uname = r['username']
+            link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
+            lines.append(f"{i}. {link} — {r['dungeon_runs']} походов")
+    else:
+        lines.append("Пока пусто.")
+        
+    await q.edit_message_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data=f"menu:top_menu:{chat_id}")]]), link_preview_options=LinkPreviewOptions(is_disabled=True))
     await q.answer()
 
 async def cb_menu_buy(update, ctx):
@@ -2242,7 +2440,9 @@ async def cb_admin_econ_farm(update, ctx):
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🌰 Желудь", callback_data="admin:econ_farm_edit:acorn")],
         [InlineKeyboardButton("🍄 Гриб", callback_data="admin:econ_farm_edit:mushroom")],
+        [InlineKeyboardButton("🎃 Тыква", callback_data="admin:econ_farm_edit:pumpkin")],
         [InlineKeyboardButton("🍁 Сироп", callback_data="admin:econ_farm_edit:syrup")],
+        [InlineKeyboardButton("🌻 Подсолнух", callback_data="admin:econ_farm_edit:sunflower")],
         [InlineKeyboardButton("◀️ Назад", callback_data="admin:econ")]
     ])
     await q.edit_message_text("🌾 <b>Настройки фермы</b>\n\nВыбери растение:", parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -2273,6 +2473,8 @@ async def cb_admin_econ_fish(update, ctx):
         [InlineKeyboardButton("🐟 Карась (шанс)", callback_data="admin:econ_set:fish_chance_carp")],
         [InlineKeyboardButton("🐠 Окунь (шанс)", callback_data="admin:econ_set:fish_chance_perch")],
         [InlineKeyboardButton("📦 Сундук (шанс)", callback_data="admin:econ_set:fish_chance_chest")],
+        [InlineKeyboardButton("🔑 Ключ (шанс)", callback_data="admin:econ_set:fish_chance_key")],
+        [InlineKeyboardButton("🦪 Жемчужина (шанс)", callback_data="admin:econ_set:fish_chance_pearl")],
         [InlineKeyboardButton("💵 Награды за рыбу", callback_data="admin:econ_fish_rew")],
         [InlineKeyboardButton("◀️ Назад", callback_data="admin:econ")]
     ])
@@ -2286,6 +2488,8 @@ async def cb_admin_econ_fish_rew(update, ctx):
         [InlineKeyboardButton("🐟 Карась (награда)", callback_data="admin:econ_set:fish_reward_carp")],
         [InlineKeyboardButton("🐠 Окунь (награда)", callback_data="admin:econ_set:fish_reward_perch")],
         [InlineKeyboardButton("📦 Сундук (награда)", callback_data="admin:econ_set:fish_reward_chest")],
+        [InlineKeyboardButton("🔑 Ключ (награда)", callback_data="admin:econ_set:fish_reward_key")],
+        [InlineKeyboardButton("🦪 Жемчужина (награда)", callback_data="admin:econ_set:fish_reward_pearl")],
         [InlineKeyboardButton("◀️ Назад", callback_data="admin:econ_fish")]
     ])
     await q.edit_message_text("💰 <b>Настройки рыбалки (Награды)</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -2411,6 +2615,7 @@ async def croc_guess_mw(update, ctx):
         if new_lvl >= 50 and "level_50" not in u['achievements']: u['achievements'].append("level_50")
         
         if len(u['achievements']) >= 10 and "ach_10" not in u['achievements']: u['achievements'].append("ach_10")
+        if len(u['achievements']) >= 20 and "ach_20" not in u['achievements']: u['achievements'].append("ach_20")
         
         db_save_user(msg.from_user.id, **u)
         _check_rich_achievements(msg.from_user.id)
@@ -2482,7 +2687,12 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_menu_shop, pattern=r"^menu:shop:"))
     app.add_handler(CallbackQueryHandler(cb_shop_cat, pattern=r"^shop:cat:"))
     app.add_handler(CallbackQueryHandler(cb_menu_inv, pattern=r"^menu:inv:"))
-    app.add_handler(CallbackQueryHandler(cb_menu_top, pattern=r"^menu:top:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_top_menu, pattern=r"^menu:top_menu:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_top_coins, pattern=r"^menu:top_coins:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_top_level, pattern=r"^menu:top_level:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_top_farm, pattern=r"^menu:top_farm:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_top_fish, pattern=r"^menu:top_fish:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_top_dung, pattern=r"^menu:top_dung:"))
     app.add_handler(CallbackQueryHandler(cb_menu_bonus, pattern=r"^menu:bonus:"))
     app.add_handler(CallbackQueryHandler(cb_menu_buy, pattern=r"^menu:buy:"))
     
