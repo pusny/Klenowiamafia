@@ -893,7 +893,7 @@ async def cmd_dm_other(update, ctx):
         
     if uid in CUSTOM_TITLE_AWAITING:
         CUSTOM_TITLE_AWAITING.pop(uid)
-        new_title = msg.text.strip()[:15]
+        new_title = msg.text.strip().replace("\n", " ")[:15]
         if not new_title:
             return await msg.reply_text("❌ Титул не может быть пустым.", reply_markup=_menu_main_kb(uid))
             
@@ -1748,10 +1748,12 @@ async def cb_pet_main(update, ctx):
             
     feed_cost = db_get_setting("pet_feed_cost", "50")
     play_cost = db_get_setting("pet_play_cost", "30")
+    up_cost = u['pet_level'] * 500
     
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton(f"🍖 Покормить ({feed_cost}🍁)", callback_data=f"pet:feed:{chat_id}")],
         [InlineKeyboardButton(f"🎾 Поиграть ({play_cost}🍁)", callback_data=f"pet:play:{chat_id}")],
+        [InlineKeyboardButton(f"⬆️ Прокачать (Ур. {u['pet_level']+1} / {up_cost}🍁)", callback_data=f"pet:upgrade:{chat_id}")],
         [InlineKeyboardButton("🍁 Собрать листики", callback_data=f"pet:collect:{chat_id}")],
         [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")]
     ])
@@ -1831,6 +1833,26 @@ async def cb_pet_play(update, ctx):
         
     db_save_user(q.from_user.id, **u)
     await q.answer("Ты поиграл с питомцем!")
+    await cb_pet_main(update, ctx)
+
+async def cb_pet_upgrade(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    u = db_get_user(q.from_user.id, q.from_user)
+    
+    if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
+    
+    cost = u['pet_level'] * 500
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
+    if u['coins'] < cost: return await q.answer("Мало листиков для прокачки!", show_alert=True)
+    
+    u['coins'] -= cost
+    u['pet_level'] += 1
+    db_save_user(q.from_user.id, **u)
+    await q.answer(f"Питомец прокачан до {u['pet_level']} уровня!")
     await cb_pet_main(update, ctx)
 
 async def cb_pet_collect(update, ctx):
@@ -2362,9 +2384,10 @@ async def cb_menu_top_coins(update, ctx):
         for i, r in enumerate(rows, 1):
             uname = r['username']
             link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
-            title_name = r['title'] or 'Новичок'
+            title_name = " ".join((r['title'] or 'Новичок').split())
             emoji = next((t['emoji'] for t in TITLES_SHOP.values() if t['name'] == title_name), '👑')
-            pet_str = f" | 🐾 {r['pet_name']} ур.{r['pet_level']}" if r['pet_name'] else ""
+            pet_name = " ".join((r['pet_name'] or '').split())
+            pet_str = f" | 🐾 {pet_name} ур.{r['pet_level']}" if pet_name else ""
             lines.append(f"{i}. {link} — {r['coins']}🍁 | {emoji} {html.escape(title_name)}{pet_str}")
     else:
         lines.append("Пока пусто.")
@@ -2387,9 +2410,10 @@ async def cb_menu_top_level(update, ctx):
         for i, r in enumerate(rows, 1):
             uname = r['username']
             link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
-            title_name = r['title'] or 'Новичок'
+            title_name = " ".join((r['title'] or 'Новичок').split())
             emoji = next((t['emoji'] for t in TITLES_SHOP.values() if t['name'] == title_name), '👑')
-            pet_str = f" | 🐾 {r['pet_name']} ур.{r['pet_level']}" if r['pet_name'] else ""
+            pet_name = " ".join((r['pet_name'] or '').split())
+            pet_str = f" | 🐾 {pet_name} ур.{r['pet_level']}" if pet_name else ""
             lines.append(f"{i}. {link} — {r['level']} lvl | {emoji} {html.escape(title_name)}{pet_str}")
     else:
         lines.append("Пока пусто.")
@@ -2842,6 +2866,7 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_pet_adopt, pattern=r"^pet:adopt:"))
     app.add_handler(CallbackQueryHandler(cb_pet_feed, pattern=r"^pet:feed:"))
     app.add_handler(CallbackQueryHandler(cb_pet_play, pattern=r"^pet:play:"))
+    app.add_handler(CallbackQueryHandler(cb_pet_upgrade, pattern=r"^pet:upgrade:"))
     app.add_handler(CallbackQueryHandler(cb_pet_collect, pattern=r"^pet:collect:"))
     
     app.add_handler(CallbackQueryHandler(cb_farm_main, pattern=r"^farm:main:"))
