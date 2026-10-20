@@ -20,8 +20,7 @@ from telegram.constants import ParseMode
 from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import (
     Application, ApplicationHandlerStop, CallbackQueryHandler,
-    ChatMemberHandler, CommandHandler, MessageHandler, filters, ContextTypes,
-    AIORateLimiter
+    ChatMemberHandler, CommandHandler, MessageHandler, filters, ContextTypes
 )
 
 load_dotenv()
@@ -2898,7 +2897,6 @@ def _build_app():
     app = (
         Application.builder()
         .token(BOT_TOKEN)
-        .rate_limiter(AIORateLimiter(overall_max_rate=25, overall_time_period=1))
         .build()
     )
     g = filters.ChatType.GROUPS
