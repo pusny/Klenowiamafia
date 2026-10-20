@@ -276,12 +276,23 @@ def _init_db():
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_chance', '45')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_max_win', '80')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_max_loss', '0')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_item_chance', '20')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_item_id', 'bait_advanced')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_item_qty', '3')")
+        
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_silver_chance', '45')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_silver_max_win', '300')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_silver_max_loss', '0')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_silver_item_chance', '25')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_silver_item_id', 'bait_luxury')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_silver_item_qty', '3')")
+        
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_gold_chance', '45')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_gold_max_win', '2000')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_gold_max_loss', '0')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_gold_item_chance', '30')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_gold_item_id', 'bait_luxury')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_gold_item_qty', '5')")
         
         conn.execute("UPDATE bot_settings SET value='45' WHERE key='case_wood_chance' AND value IN ('40','15','60')")
         conn.execute("UPDATE bot_settings SET value='80' WHERE key='case_wood_max_win' AND value IN ('30','200','100')")
@@ -810,6 +821,39 @@ async def cmd_dm_other(update, ctx):
                     await _safe_send(ctx.bot, target, f"🍁 <b>Уведомление</b>\n\nУ тебя списано <b>{abs(amount)}🍁</b>.\nТвой новый баланс: <b>{new_balance}🍁</b>", parse_mode=ParseMode.HTML)
                 else:
                     await msg.reply_text("Сумма 0, ничего не изменилось.", reply_markup=_menu_main_kb(uid))
+            elif action == "give_item" and len(parts) >= 2:
+                target = int(parts[0].replace("@", ""))
+                item_id = parts[1].strip()
+                amount = int(parts[2]) if len(parts) > 2 else 1
+                
+                u = db_get_user(target)
+                
+                if item_id in SHOP_ITEMS:
+                    u['inventory'][item_id] = u['inventory'].get(item_id, 0) + amount
+                    item_name = f"{SHOP_ITEMS[item_id]['emoji']} {SHOP_ITEMS[item_id]['name']}"
+                    db_save_user(target, **u)
+                elif item_id == "fish_bait":
+                    u['fish_bait'] += amount
+                    item_name = "🪱 Обычная наживка"
+                    db_save_user(target, **u)
+                elif item_id == "fish_rod":
+                    u['fish_rod'] += amount
+                    item_name = "🎣 Удочка (уровень)"
+                    db_save_user(target, **u)
+                elif item_id == "dungeon_weapon":
+                    u['dungeon_weapon'] += amount
+                    item_name = "🗡 Оружие (уровень)"
+                    db_save_user(target, **u)
+                elif item_id == "dungeon_armor":
+                    u['dungeon_armor'] += amount
+                    item_name = "🛡 Броня (уровень)"
+                    db_save_user(target, **u)
+                else:
+                    return await msg.reply_text(f"❌ Неизвестный предмет: {item_id}", reply_markup=_menu_main_kb(uid))
+                    
+                await msg.reply_text(f"✅ Выдано {amount} x {item_name} юзеру {target}", reply_markup=_menu_main_kb(uid))
+                await _safe_send(ctx.bot, target, f"🎁 <b>Уведомление</b>\n\nТебе выдано: <b>{item_name}</b> x{amount}!", parse_mode=ParseMode.HTML)
+                
             elif action == "give_level" and len(parts) >= 2:
                 target, lvl = int(parts[0].replace("@", "")), int(parts[1])
                 db_save_user(target, level=lvl)
@@ -872,8 +916,11 @@ async def cmd_dm_other(update, ctx):
             elif action.startswith("case_"):
                 parts_key = action.split("_")
                 c_type = parts_key[1]
-                setting = parts_key[2]
-                val = int(parts[0])
+                setting = "_".join(parts_key[2:])
+                if setting == "item_id":
+                    val = parts[0].strip()
+                else:
+                    val = int(parts[0])
                 db_set_setting(f"case_{c_type}_{setting}", str(val))
                 await msg.reply_text(f"✅ Настройка {setting} для {c_type} кейса обновлена: {val}", reply_markup=_menu_main_kb(uid))
             elif action.startswith("farm_"):
@@ -1548,7 +1595,13 @@ async def cb_shop_item(update, ctx):
     if iid.startswith("case_"):
         chance = db_get_setting(f"{iid}_chance", "45")
         max_win = db_get_setting(f"{iid}_max_win", "100")
-        desc = f"Шанс {chance}%. Выигрыш до {max_win}🍁!"
+        i_chance = db_get_setting(f"{iid}_item_chance", "20")
+        default_item = "bait_advanced" if iid == "case_wood" else "bait_luxury"
+        drop_id = db_get_setting(f"{iid}_item_id", default_item)
+        drop_qty = db_get_setting(f"{iid}_item_qty", "3")
+        
+        item_name = SHOP_ITEMS[drop_id]['name'] if drop_id in SHOP_ITEMS else "Неизвестно"
+        desc = f"Шанс {chance}%. Выигрыш до {max_win}🍁!\nШанс предмета: {i_chance}% ({item_name} x{drop_qty})"
     
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Купить", callback_data=f"shop:buy:{chat_id}:{iid}")], [InlineKeyboardButton("◀️ Назад", callback_data=f"shop:cat:{chat_id}:{cat}")]])
     await q.edit_message_text(f"{item['emoji']} <b>{item['name']}</b>\n{desc}\nЦена: <b>{item['price']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -1634,25 +1687,18 @@ async def cb_inv_use(update, ctx):
         
         chance = int(db_get_setting(f"{iid}_chance", "45"))
         max_win = int(db_get_setting(f"{iid}_max_win", "100"))
+        i_chance = int(db_get_setting(f"{iid}_item_chance", "20"))
+        default_item = "bait_advanced" if iid == "case_wood" else "bait_luxury"
+        drop_id = db_get_setting(f"{iid}_item_id", default_item)
+        drop_qty = int(db_get_setting(f"{iid}_item_qty", "3"))
         
         won = random.randint(1, 100) <= chance
-        item_drop_chance = {"case_wood": 20, "case_silver": 25, "case_gold": 30}.get(iid, 0)
         
-        if won and random.randint(1, 100) <= item_drop_chance:
-            drops = {
-                "case_wood": [("bait_advanced", 3, 60), ("bait_luxury", 1, 40)],
-                "case_silver": [("bait_advanced", 5, 50), ("bait_luxury", 3, 50)],
-                "case_gold": [("bait_advanced", 10, 50), ("bait_luxury", 5, 50)]
-            }.get(iid, [])
-            r = random.randint(1, 100)
-            cum = 0
-            drop_str = ""
-            for drop_id, qty, ch in drops:
-                cum += ch
-                if r <= cum:
-                    u['inventory'][drop_id] = u['inventory'].get(drop_id, 0) + qty
-                    drop_str = f"{SHOP_ITEMS[drop_id]['emoji']} {SHOP_ITEMS[drop_id]['name']} x{qty}"
-                    break
+        if won and random.randint(1, 100) <= i_chance:
+            if drop_id not in SHOP_ITEMS:
+                drop_id = "bait_advanced"
+            u['inventory'][drop_id] = u['inventory'].get(drop_id, 0) + drop_qty
+            drop_str = f"{SHOP_ITEMS[drop_id]['emoji']} {SHOP_ITEMS[drop_id]['name']} x{drop_qty}"
             db_save_user(q.from_user.id, **u)
             await q.answer("🎁 Выпал предмет!")
             text = f"{SHOP_ITEMS[iid]['emoji']} Ты открыл {SHOP_ITEMS[iid]['name']} и получил: <b>{drop_str}</b>!\nТвой баланс: {_balance_str(u['coins'])}"
@@ -2563,6 +2609,7 @@ async def cb_admin_main(update, ctx):
         [InlineKeyboardButton("⭐ Изменить уровень", callback_data="admin:act:give_level")],
         [InlineKeyboardButton("👑 Выдать титул", callback_data="admin:act:give_title")],
         [InlineKeyboardButton("🚫 Забрать титул", callback_data="admin:act:take_title")],
+        [InlineKeyboardButton("🎒 Выдать предмет", callback_data="admin:act:give_item")],
         [InlineKeyboardButton("🔍 Профиль юзера", callback_data="admin:act:view_profile")],
         [InlineKeyboardButton("🚫 Забанить юзера", callback_data="admin:act:ban_user")],
         [InlineKeyboardButton("✅ Разбанить юзера", callback_data="admin:act:unban_user")],
@@ -2591,11 +2638,23 @@ async def cb_admin_case_edit(update, ctx):
     c_type = q.data.split(":")[2]
     chance = db_get_setting(f"case_{c_type}_chance", "45")
     max_win = db_get_setting(f"case_{c_type}_max_win", "100")
+    i_chance = db_get_setting(f"case_{c_type}_item_chance", "20")
+    default_item = "bait_advanced" if c_type == "wood" else "bait_luxury"
+    i_id = db_get_setting(f"case_{c_type}_item_id", default_item)
+    i_qty = db_get_setting(f"case_{c_type}_item_qty", "3")
     
-    text = f"📦 <b>Настройки {c_type} кейса</b>\n\nШанс: <b>{chance}%</b>\nМакс. выигрыш: <b>{max_win}🍁</b>"
+    text = (f"📦 <b>Настройки {c_type} кейса</b>\n\n"
+            f"Шанс выигрыша: <b>{chance}%</b>\n"
+            f"Макс. выигрыш: <b>{max_win}🍁</b>\n\n"
+            f"Шанс дропа предмета: <b>{i_chance}%</b>\n"
+            f"Предмет: <b>{i_id}</b>\n"
+            f"Кол-во: <b>{i_qty}</b>")
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🎯 Шанс победы", callback_data=f"admin:case_set:{c_type}:chance")],
         [InlineKeyboardButton("📈 Макс. выигрыш", callback_data=f"admin:case_set:{c_type}:max_win")],
+        [InlineKeyboardButton("🎁 Шанс дропа предмета", callback_data=f"admin:case_set:{c_type}:item_chance")],
+        [InlineKeyboardButton("📦 ID Предмета", callback_data=f"admin:case_set:{c_type}:item_id")],
+        [InlineKeyboardButton("🔢 Кол-во предметов", callback_data=f"admin:case_set:{c_type}:item_qty")],
         [InlineKeyboardButton("◀️ Назад", callback_data="admin:case")]
     ])
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -2607,7 +2666,10 @@ async def cb_admin_case_set(update, ctx):
     ADMIN_STATE[q.from_user.id] = f"case_{c_type}_{setting}"
     prompts = {
         "chance": "шанс выигрыша (1-99)",
-        "max_win": "максимальный выигрыш"
+        "max_win": "максимальный выигрыш",
+        "item_chance": "шанс дропа предмета (1-99)",
+        "item_id": "ID предмета (например: bait_advanced, bait_luxury, case_wood)",
+        "item_qty": "количество предметов (1-100)"
     }
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Отмена", callback_data="admin:cancel_input")]])
     await q.edit_message_text(f"🛠 Отправь {prompts[setting]} для {c_type} кейса:", parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -2776,6 +2838,7 @@ async def cb_admin_act(update, ctx):
         "give_level": "Отправь: <code>ID уровень</code>\n<i>(учти, что уровень не может быть ниже заработанного)</i>",
         "give_title": "Отправь: <code>ID Титул</code>",
         "take_title": "Отправь: <code>ID Титул</code>",
+        "give_item": "Отправь: <code>ID_юзера предмет [кол-во]</code>\n<i>(например: 123456789 bait_advanced 5)</i>\nПредметы: bait_advanced, bait_luxury, fish_bait, fish_rod, dungeon_weapon, dungeon_armor, и любые из магазина",
         "view_profile": "Отправь: <code>ID юзера</code>",
         "ban_user": "Отправь: <code>ID юзера</code>",
         "unban_user": "Отправь: <code>ID юзера</code>"
