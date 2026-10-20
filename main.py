@@ -196,7 +196,12 @@ def _init_db():
                 fish_cd REAL DEFAULT 0,
                 dungeon_weapon INTEGER DEFAULT 1,
                 dungeon_armor INTEGER DEFAULT 1,
-                dungeon_cd REAL DEFAULT 0
+                dungeon_cd REAL DEFAULT 0,
+                pet_name TEXT DEFAULT '',
+                pet_level INTEGER DEFAULT 1,
+                pet_hunger INTEGER DEFAULT 100,
+                pet_happy INTEGER DEFAULT 100,
+                pet_last_time REAL DEFAULT 0
             );
         """)
         
@@ -225,6 +230,16 @@ def _init_db():
             conn.execute("ALTER TABLE users_data ADD COLUMN dungeon_armor INTEGER DEFAULT 1")
         if "dungeon_cd" not in cols:
             conn.execute("ALTER TABLE users_data ADD COLUMN dungeon_cd REAL DEFAULT 0")
+        if "pet_name" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN pet_name TEXT DEFAULT ''")
+        if "pet_level" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN pet_level INTEGER DEFAULT 1")
+        if "pet_hunger" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN pet_hunger INTEGER DEFAULT 100")
+        if "pet_happy" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN pet_happy INTEGER DEFAULT 100")
+        if "pet_last_time" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN pet_last_time REAL DEFAULT 0")
             
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_chance', '60')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_max_win', '100')")
@@ -260,6 +275,12 @@ def _init_db():
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('dungeon_mult_chance', '5')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('dungeon_reward_min', '100')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('dungeon_reward_max', '200')")
+        
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_cost', '500')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_feed_cost', '50')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_play_cost', '30')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_decay_time', '600')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_base_yield', '20')")
         conn.commit()
 
 _init_db()
@@ -323,6 +344,11 @@ def db_get_user(user_id, tg_user=None):
         d['dungeon_weapon'] = int(d.get('dungeon_weapon') or 1)
         d['dungeon_armor'] = int(d.get('dungeon_armor') or 1)
         d['dungeon_cd'] = float(d.get('dungeon_cd') or 0)
+        d['pet_name'] = d.get('pet_name') or ''
+        d['pet_level'] = int(d.get('pet_level') or 1)
+        d['pet_hunger'] = int(d.get('pet_hunger') or 100)
+        d['pet_happy'] = int(d.get('pet_happy') or 100)
+        d['pet_last_time'] = float(d.get('pet_last_time') or 0.0)
         
         total_xp = d['wins'] * 2 + d['games'] + d['croc_wins']
         calc_level = total_xp // 5 + 1
@@ -342,13 +368,15 @@ def db_save_user(uid, **kwargs):
         conn.execute("""
             UPDATE users_data SET 
                 username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?, croc_wins=?, mafia_wins=?, city_wins=?,
-                farm_slots=?, farm_data=?, fish_rod=?, fish_bait=?, fish_cd=?, dungeon_weapon=?, dungeon_armor=?, dungeon_cd=?
+                farm_slots=?, farm_data=?, fish_rod=?, fish_bait=?, fish_cd=?, dungeon_weapon=?, dungeon_armor=?, dungeon_cd=?,
+                pet_name=?, pet_level=?, pet_hunger=?, pet_happy=?, pet_last_time=?
             WHERE user_id=?
         """, (
             u['username'], u['coins'], u['level'], u['title'], u['wins'], u['games'],
             json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'],
             u['croc_wins'], u['mafia_wins'], u['city_wins'],
-            u['farm_slots'], json.dumps(u['farm_data']), u['fish_rod'], u['fish_bait'], u['fish_cd'], u['dungeon_weapon'], u['dungeon_armor'], u['dungeon_cd'], uid
+            u['farm_slots'], json.dumps(u['farm_data']), u['fish_rod'], u['fish_bait'], u['fish_cd'], u['dungeon_weapon'], u['dungeon_armor'], u['dungeon_cd'],
+            u['pet_name'], u['pet_level'], u['pet_hunger'], u['pet_happy'], u['pet_last_time'], uid
         ))
         conn.commit()
 
@@ -519,7 +547,7 @@ def _menu_main_kb(user_id, chat_id=0):
         [InlineKeyboardButton("👤 Профиль", callback_data=f"menu:profile:{chat_id}"), InlineKeyboardButton("🛒 Магазин", callback_data=f"menu:shop:{chat_id}")],
         [InlineKeyboardButton("🎒 Инвентарь", callback_data=f"menu:inv:{chat_id}"), InlineKeyboardButton("🏆 Топ", callback_data=f"menu:top:{chat_id}")],
         [InlineKeyboardButton("🏅 Достижения", callback_data=f"menu:ach:{chat_id}"), InlineKeyboardButton("🍁 Бонус", callback_data=f"menu:bonus:{chat_id}")],
-        [InlineKeyboardButton("👑 Титулы", callback_data=f"menu:titles:{chat_id}")],
+        [InlineKeyboardButton("👑 Титулы", callback_data=f"menu:titles:{chat_id}"), InlineKeyboardButton("🐾 Питомец", callback_data=f"pet:main:{chat_id}")],
         [InlineKeyboardButton("🌾 Ферма", callback_data=f"farm:main:{chat_id}"), InlineKeyboardButton("🎣 Рыбалка", callback_data=f"fish:main:{chat_id}")],
         [InlineKeyboardButton("⚔️ Подземелье", callback_data=f"dungeon:main:{chat_id}")],
         [InlineKeyboardButton("💎 Купить 🍁", callback_data=f"menu:buy:{chat_id}")]
@@ -742,6 +770,11 @@ async def cmd_dm_other(update, ctx):
                 val = int(parts[0])
                 db_set_setting(f"dungeon_{setting}", str(val))
                 await msg.reply_text(f"✅ Данж: {setting} обновлено на {val}", reply_markup=_menu_main_kb(uid))
+            elif action.startswith("pet_"):
+                setting = action.replace("pet_", "")
+                val = int(parts[0])
+                db_set_setting(f"pet_{setting}", str(val))
+                await msg.reply_text(f"✅ Питомец: {setting} обновлено на {val}", reply_markup=_menu_main_kb(uid))
         except Exception:
             await msg.reply_text("❌ Ошибка. Проверь формат ввода.", reply_markup=_menu_main_kb(uid))
         return
@@ -770,7 +803,7 @@ async def cmd_dm_other(update, ctx):
             except Exception:
                 pass
         else:
-            await msg.reply_text("❌ Ошибка. Пиши: <code>Слово | Описание</code>. Загадай заново в чате.")
+            await msg.reply_text("❌ Ошибка. Пиши: Слово | Описание. Загадай заново в чате.")
             try:
                 await ctx.bot.send_message(chat_id, "🐊 <b>Крокодил</b>\nНажми кнопку, чтобы загадать слово.", message_thread_id=THREAD_ID or 0, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]]))
             except Exception:
@@ -1545,6 +1578,149 @@ async def cb_inv_use(update, ctx):
         pass
 
 
+async def cb_pet_main(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    u = db_get_user(q.from_user.id, q.from_user)
+    
+    if not u['pet_name']:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🥚 Завести питомца", callback_data=f"pet:adopt:{chat_id}")],
+            [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")]
+        ])
+        cost = db_get_setting("pet_cost", "500")
+        await q.edit_message_text(f"🐾 <b>Питомец</b>\n\nУ тебя пока нет питомца. Заведи себе друга за <b>{cost}🍁</b>!", parse_mode=ParseMode.HTML, reply_markup=kb)
+        return await q.answer()
+
+    now = time.time()
+    last = u['pet_last_time']
+    decay_time = int(db_get_setting("pet_decay_time", "600"))
+    
+    diff = now - last
+    if diff >= decay_time:
+        decay_amount = int(diff // decay_time)
+        new_hunger = max(0, u['pet_hunger'] - decay_amount)
+        new_happy = max(0, u['pet_happy'] - decay_amount)
+        
+        u['pet_hunger'] = new_hunger
+        u['pet_happy'] = new_happy
+        u['pet_last_time'] = now - (diff % decay_time)
+        db_save_user(q.from_user.id, pet_hunger=new_hunger, pet_happy=new_happy, pet_last_time=u['pet_last_time'])
+        
+    text = (f"🐾 <b>Твой питомец: {u['pet_name']}</b>\n"
+            f"⭐ Уровень: <b>{u['pet_level']}</b>\n\n"
+            f"🍖 Сытость: <b>{u['pet_hunger']}/100</b>\n"
+            f"🎾 Счастье: <b>{u['pet_happy']}/100</b>\n\n")
+            
+    feed_cost = db_get_setting("pet_feed_cost", "50")
+    play_cost = db_get_setting("pet_play_cost", "30")
+    
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🍖 Покормить ({feed_cost}🍁)", callback_data=f"pet:feed:{chat_id}")],
+        [InlineKeyboardButton(f"🎾 Поиграть ({play_cost}🍁)", callback_data=f"pet:play:{chat_id}")],
+        [InlineKeyboardButton("🍁 Собрать листики", callback_data=f"pet:collect:{chat_id}")],
+        [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")]
+    ])
+    
+    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    await q.answer()
+
+async def cb_pet_adopt(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    u = db_get_user(q.from_user.id, q.from_user)
+    
+    if u['pet_name']: return await q.answer("У тебя уже есть питомец!", show_alert=True)
+    
+    cost = int(db_get_setting("pet_cost", "500"))
+    if u['coins'] < cost: return await q.answer("Мало листиков!", show_alert=True)
+    
+    u['coins'] -= cost
+    pets = ["Кленовый Котенок", "Осенний Лисенок", "Лесной Ежик", "Золотой Совенок", "Красный Бельчонок"]
+    pet = random.choice(pets)
+    
+    u['pet_name'] = pet
+    u['pet_level'] = 1
+    u['pet_hunger'] = 100
+    u['pet_happy'] = 100
+    u['pet_last_time'] = time.time()
+    
+    db_save_user(q.from_user.id, **u)
+    await q.answer(f"Ты завел: {pet}!")
+    await cb_pet_main(update, ctx)
+
+async def cb_pet_feed(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    u = db_get_user(q.from_user.id, q.from_user)
+    
+    if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
+    cost = int(db_get_setting("pet_feed_cost", "50"))
+    if u['coins'] < cost: return await q.answer("Мало листиков!", show_alert=True)
+    
+    u['coins'] -= cost
+    u['pet_hunger'] = min(100, u['pet_hunger'] + 30)
+    
+    if random.randint(1, 100) <= 20 and u['pet_level'] < 10:
+        u['pet_level'] += 1
+        
+    db_save_user(q.from_user.id, **u)
+    await q.answer("Питомец покормлен!")
+    await cb_pet_main(update, ctx)
+
+async def cb_pet_play(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    u = db_get_user(q.from_user.id, q.from_user)
+    
+    if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
+    cost = int(db_get_setting("pet_play_cost", "30"))
+    if u['coins'] < cost: return await q.answer("Мало листиков!", show_alert=True)
+    
+    u['coins'] -= cost
+    u['pet_happy'] = min(100, u['pet_happy'] + 30)
+    
+    if random.randint(1, 100) <= 20 and u['pet_level'] < 10:
+        u['pet_level'] += 1
+        
+    db_save_user(q.from_user.id, **u)
+    await q.answer("Ты поиграл с питомцем!")
+    await cb_pet_main(update, ctx)
+
+async def cb_pet_collect(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    u = db_get_user(q.from_user.id, q.from_user)
+    
+    if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
+    
+    if u['pet_hunger'] < 50 or u['pet_happy'] < 50:
+        return await q.answer("Питомец голоден или грустит! Покорми или поиграй с ним.", show_alert=True)
+        
+    base_yield = int(db_get_setting("pet_base_yield", "20"))
+    reward = base_yield * u['pet_level']
+    
+    u['coins'] += reward
+    u['pet_hunger'] = max(0, u['pet_hunger'] - 20)
+    u['pet_happy'] = max(0, u['pet_happy'] - 20)
+    
+    db_save_user(q.from_user.id, **u)
+    _check_rich_achievements(q.from_user.id)
+    
+    await q.answer(f"Собрано: +{reward}🍁!")
+    await cb_pet_main(update, ctx)
+
+
 async def cb_farm_main(update, ctx):
     q = update.callback_query
     if not q: return
@@ -2029,9 +2205,36 @@ async def cb_admin_econ(update, ctx):
         [InlineKeyboardButton("🌾 Ферма", callback_data="admin:econ_farm")],
         [InlineKeyboardButton("🎣 Рыбалка", callback_data="admin:econ_fish")],
         [InlineKeyboardButton("⚔️ Подземелье", callback_data="admin:econ_dungeon")],
+        [InlineKeyboardButton("🐾 Питомец", callback_data="admin:econ_pet")],
         [InlineKeyboardButton("◀️ Назад", callback_data="admin:main")]
     ])
     await q.edit_message_text("⚙️ <b>Настройки экономики</b>\n\nВыбери раздел:", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await q.answer()
+
+async def cb_admin_econ_pet(update, ctx):
+    q = update.callback_query
+    cost = db_get_setting("pet_cost", "500")
+    feed = db_get_setting("pet_feed_cost", "50")
+    play = db_get_setting("pet_play_cost", "30")
+    decay = db_get_setting("pet_decay_time", "600")
+    base_yield = db_get_setting("pet_base_yield", "20")
+    
+    text = (f"🐾 <b>Настройки питомца</b>\n\n"
+            f"Цена покупки: <b>{cost}🍁</b>\n"
+            f"Цена кормежки: <b>{feed}🍁</b>\n"
+            f"Цена игры: <b>{play}🍁</b>\n"
+            f"Голодание (сек): <b>{decay}</b>\n"
+            f"Базовый доход: <b>{base_yield}🍁</b>")
+            
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💰 Цена покупки", callback_data="admin:econ_set:pet_cost")],
+        [InlineKeyboardButton("🍖 Цена кормежки", callback_data="admin:econ_set:pet_feed_cost")],
+        [InlineKeyboardButton("🎾 Цена игры", callback_data="admin:econ_set:pet_play_cost")],
+        [InlineKeyboardButton("⏱ Голодание (сек)", callback_data="admin:econ_set:pet_decay_time")],
+        [InlineKeyboardButton("📈 Базовый доход", callback_data="admin:econ_set:pet_base_yield")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="admin:econ")]
+    ])
+    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 async def cb_admin_econ_farm(update, ctx):
@@ -2283,6 +2486,12 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_menu_bonus, pattern=r"^menu:bonus:"))
     app.add_handler(CallbackQueryHandler(cb_menu_buy, pattern=r"^menu:buy:"))
     
+    app.add_handler(CallbackQueryHandler(cb_pet_main, pattern=r"^pet:main:"))
+    app.add_handler(CallbackQueryHandler(cb_pet_adopt, pattern=r"^pet:adopt:"))
+    app.add_handler(CallbackQueryHandler(cb_pet_feed, pattern=r"^pet:feed:"))
+    app.add_handler(CallbackQueryHandler(cb_pet_play, pattern=r"^pet:play:"))
+    app.add_handler(CallbackQueryHandler(cb_pet_collect, pattern=r"^pet:collect:"))
+    
     app.add_handler(CallbackQueryHandler(cb_farm_main, pattern=r"^farm:main:"))
     app.add_handler(CallbackQueryHandler(cb_farm_plant_menu, pattern=r"^farm:plant_menu:"))
     app.add_handler(CallbackQueryHandler(cb_farm_plant, pattern=r"^farm:plant:"))
@@ -2310,6 +2519,7 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_admin_case_edit, pattern=r"^admin:case_edit:"))
     app.add_handler(CallbackQueryHandler(cb_admin_case_set, pattern=r"^admin:case_set:"))
     app.add_handler(CallbackQueryHandler(cb_admin_econ, pattern=r"^admin:econ$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_econ_pet, pattern=r"^admin:econ_pet$"))
     app.add_handler(CallbackQueryHandler(cb_admin_econ_farm, pattern=r"^admin:econ_farm$"))
     app.add_handler(CallbackQueryHandler(cb_admin_econ_farm_edit, pattern=r"^admin:econ_farm_edit:"))
     app.add_handler(CallbackQueryHandler(cb_admin_econ_fish, pattern=r"^admin:econ_fish$"))
