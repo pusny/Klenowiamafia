@@ -223,7 +223,8 @@ def _init_db():
                 pet_sick INTEGER DEFAULT 0,
                 farm_harvests INTEGER DEFAULT 0,
                 fish_caught INTEGER DEFAULT 0,
-                dungeon_runs INTEGER DEFAULT 0
+                dungeon_runs INTEGER DEFAULT 0,
+                dungeon_distance INTEGER DEFAULT 0
             );
         """)
         
@@ -270,6 +271,8 @@ def _init_db():
             conn.execute("ALTER TABLE users_data ADD COLUMN fish_caught INTEGER DEFAULT 0")
         if "dungeon_runs" not in cols:
             conn.execute("ALTER TABLE users_data ADD COLUMN dungeon_runs INTEGER DEFAULT 0")
+        if "dungeon_distance" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN dungeon_distance INTEGER DEFAULT 0")
             
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_chance', '45')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('case_wood_max_win', '80')")
@@ -296,18 +299,23 @@ def _init_db():
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_acorn_max', '15')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_mushroom_time', '300')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_mushroom_min', '0')")
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_mushroom_max', '70')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_mushroom_max', '75')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_pumpkin_time', '900')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_pumpkin_min', '0')")
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_pumpkin_max', '180')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_pumpkin_max', '150')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_syrup_time', '1800')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_syrup_min', '0')")
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_syrup_max', '400')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_syrup_max', '300')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_sunflower_time', '3600')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_sunflower_min', '0')")
-        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_sunflower_max', '1000')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('farm_sunflower_max', '750')")
         
         conn.execute("UPDATE bot_settings SET value='0' WHERE key LIKE 'farm_%_min' AND CAST(value AS INTEGER) < 0")
+        conn.execute("UPDATE bot_settings SET value='15' WHERE key='farm_acorn_max' AND value IN ('20', '15')")
+        conn.execute("UPDATE bot_settings SET value='75' WHERE key='farm_mushroom_max' AND value IN ('100', '70')")
+        conn.execute("UPDATE bot_settings SET value='150' WHERE key='farm_pumpkin_max' AND value IN ('200', '180')")
+        conn.execute("UPDATE bot_settings SET value='300' WHERE key='farm_syrup_max' AND value IN ('400')")
+        conn.execute("UPDATE bot_settings SET value='750' WHERE key='farm_sunflower_max' AND value IN ('1000')")
         
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_boot', '30')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('fish_chance_leaf', '30')")
@@ -404,6 +412,7 @@ def db_get_user(user_id, tg_user=None):
         d['dungeon_weapon'] = int(d.get('dungeon_weapon') or 1)
         d['dungeon_armor'] = int(d.get('dungeon_armor') or 1)
         d['dungeon_cd'] = float(d.get('dungeon_cd') or 0)
+        d['dungeon_distance'] = int(d.get('dungeon_distance') or 0)
         d['pet_name'] = d.get('pet_name') or ''
         d['pet_level'] = int(d.get('pet_level') or 1)
         d['pet_hunger'] = int(d.get('pet_hunger') or 100)
@@ -432,7 +441,7 @@ def db_save_user(uid, **kwargs):
         conn.execute("""
             UPDATE users_data SET 
                 username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?, croc_wins=?, mafia_wins=?, city_wins=?,
-                farm_slots=?, farm_data=?, fish_rod=?, fish_bait=?, fish_cd=?, dungeon_weapon=?, dungeon_armor=?, dungeon_cd=?,
+                farm_slots=?, farm_data=?, fish_rod=?, fish_bait=?, fish_cd=?, dungeon_weapon=?, dungeon_armor=?, dungeon_cd=?, dungeon_distance=?,
                 pet_name=?, pet_level=?, pet_hunger=?, pet_happy=?, pet_last_time=?, pet_sick=?,
                 farm_harvests=?, fish_caught=?, dungeon_runs=?
             WHERE user_id=?
@@ -440,7 +449,7 @@ def db_save_user(uid, **kwargs):
             u['username'], u['coins'], u['level'], u['title'], u['wins'], u['games'],
             json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'],
             u['croc_wins'], u['mafia_wins'], u['city_wins'],
-            u['farm_slots'], json.dumps(u['farm_data']), u['fish_rod'], u['fish_bait'], u['fish_cd'], u['dungeon_weapon'], u['dungeon_armor'], u['dungeon_cd'],
+            u['farm_slots'], json.dumps(u['farm_data']), u['fish_rod'], u['fish_bait'], u['fish_cd'], u['dungeon_weapon'], u['dungeon_armor'], u['dungeon_cd'], u['dungeon_distance'],
             u['pet_name'], u['pet_level'], u['pet_hunger'], u['pet_happy'], u['pet_last_time'], u['pet_sick'],
             u['farm_harvests'], u['fish_caught'], u['dungeon_runs'], uid
         ))
@@ -848,7 +857,7 @@ async def cmd_dm_other(update, ctx):
                         f"🐾 Питомец: <b>{pet_str}</b>\n"
                         f"🌾 Урожаев: <b>{u['farm_harvests']}</b>\n"
                         f"🎣 Рыбы: <b>{u['fish_caught']}</b>\n"
-                        f"⚔️ Походов: <b>{u['dungeon_runs']}</b>\n\n"
+                        f"⚔️ Походов: <b>{u['dungeon_runs']}</b> (🥾 {u['dungeon_distance']} км)\n\n"
                         f"🎒 Инвентарь: {inv_str}\n\n"
                         f"🏅 Достижения ({len(u['achievements'])}): {ach_str}")
                 
@@ -1402,7 +1411,7 @@ async def cb_menu_profile(update, ctx):
             f"🏆 Побед: <b>{u['wins']}</b> / Игр: <b>{u['games']}</b>\n"
             f"🌾 Урожаев: <b>{u['farm_harvests']}</b>\n"
             f"🎣 Рыбы: <b>{u['fish_caught']}</b>\n"
-            f"⚔️ Походов: <b>{u['dungeon_runs']}</b>\n\n"
+            f"⚔️ Походов: <b>{u['dungeon_runs']}</b> (🥾 {u['dungeon_distance']} км)\n\n"
             f"🎒 Инвентарь: <code>{len(u['inventory'])}</code> предм.\n"
             f"🏅 Достижений: <code>{len(u['achievements'])}</code>")
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
@@ -2003,10 +2012,10 @@ async def cb_farm_plant(update, ctx):
         
     seeds = {
         "acorn": {"name": "Желудь", "cost": 10, "time": int(db_get_setting("farm_acorn_time", "60")), "min_yield": int(db_get_setting("farm_acorn_min", "0")), "max_yield": int(db_get_setting("farm_acorn_max", "15"))},
-        "mushroom": {"name": "Гриб", "cost": 50, "time": int(db_get_setting("farm_mushroom_time", "300")), "min_yield": int(db_get_setting("farm_mushroom_min", "0")), "max_yield": int(db_get_setting("farm_mushroom_max", "70"))},
-        "pumpkin": {"name": "Тыква", "cost": 100, "time": int(db_get_setting("farm_pumpkin_time", "900")), "min_yield": int(db_get_setting("farm_pumpkin_min", "0")), "max_yield": int(db_get_setting("farm_pumpkin_max", "180"))},
-        "syrup": {"name": "Кленовый сироп", "cost": 200, "time": int(db_get_setting("farm_syrup_time", "1800")), "min_yield": int(db_get_setting("farm_syrup_min", "0")), "max_yield": int(db_get_setting("farm_syrup_max", "400"))},
-        "sunflower": {"name": "Подсолнух", "cost": 500, "time": int(db_get_setting("farm_sunflower_time", "3600")), "min_yield": int(db_get_setting("farm_sunflower_min", "0")), "max_yield": int(db_get_setting("farm_sunflower_max", "1000"))}
+        "mushroom": {"name": "Гриб", "cost": 50, "time": int(db_get_setting("farm_mushroom_time", "300")), "min_yield": int(db_get_setting("farm_mushroom_min", "0")), "max_yield": int(db_get_setting("farm_mushroom_max", "75"))},
+        "pumpkin": {"name": "Тыква", "cost": 100, "time": int(db_get_setting("farm_pumpkin_time", "900")), "min_yield": int(db_get_setting("farm_pumpkin_min", "0")), "max_yield": int(db_get_setting("farm_pumpkin_max", "150"))},
+        "syrup": {"name": "Кленовый сироп", "cost": 200, "time": int(db_get_setting("farm_syrup_time", "1800")), "min_yield": int(db_get_setting("farm_syrup_min", "0")), "max_yield": int(db_get_setting("farm_syrup_max", "300"))},
+        "sunflower": {"name": "Подсолнух", "cost": 500, "time": int(db_get_setting("farm_sunflower_time", "3600")), "min_yield": int(db_get_setting("farm_sunflower_min", "0")), "max_yield": int(db_get_setting("farm_sunflower_max", "750"))}
     }
     
     if seed_type not in seeds: return await q.answer("Неверный тип", show_alert=True)
@@ -2262,7 +2271,7 @@ async def cb_dungeon_main(update, ctx):
     
     entry_cost = int(db_get_setting("dungeon_entry_cost", "50"))
     
-    text = f"⚔️ <b>Подземелье Листвы</b>\n\nОружие: <b>Ур. {u['dungeon_weapon']}</b>\nБроня: <b>Ур. {u['dungeon_armor']}</b>\nПоходов: <b>{u['dungeon_runs']}</b>\n\n"
+    text = f"⚔️ <b>Подземелье Листвы</b>\n\nОружие: <b>Ур. {u['dungeon_weapon']}</b>\nБроня: <b>Ур. {u['dungeon_armor']}</b>\nПоходов: <b>{u['dungeon_runs']}</b> (🥾 {u['dungeon_distance']} км)\n\n"
     rows = []
     
     if cd > 0:
@@ -2308,6 +2317,9 @@ async def cb_dungeon_start(update, ctx):
     
     won = random.randint(1, 100) <= success_chance
     
+    distance = random.randint(5, 35)
+    u['dungeon_distance'] = u['dungeon_distance'] + distance
+    
     u['dungeon_cd'] = time.time() + 21600
     u['dungeon_runs'] += 1
     
@@ -2322,9 +2334,9 @@ async def cb_dungeon_start(update, ctx):
         loot_item, loot_mult = random.choice(loot_table)
         reward = random.randint(reward_min, reward_max) * power * loot_mult
         u['coins'] += reward
-        msg = f"⚔️ <b>Успех!</b>\n\nГерой вернулся из Подземелья Листвы с ресурсом: <b>{loot_item}</b>!\nДобыча: <b>+{reward}🍁</b>!\n\nТвой баланс: {_balance_str(u['coins'])}\nВсего походов: <b>{u['dungeon_runs']}</b>"
+        msg = f"⚔️ <b>Успех!</b>\n\nГерой вернулся из Подземелья Листвы с ресурсом: <b>{loot_item}</b>!\nДобыча: <b>+{reward}🍁</b>!\n🥾 Пройдено: <b>+{distance} км</b>\n\nТвой баланс: {_balance_str(u['coins'])}\nВсего походов: <b>{u['dungeon_runs']}</b> (🥾 {u['dungeon_distance']} км)"
     else:
-        msg = f"💀 <b>Поражение...</b>\n\nГерой не справился с монстрами. Вы ничего не получили.\n\nТвой баланс: {_balance_str(u['coins'])}\nВсего походов: <b>{u['dungeon_runs']}</b>"
+        msg = f"💀 <b>Поражение...</b>\n\nГерой не справился с монстрами. Вы ничего не получили.\n🥾 Пройдено: <b>+{distance} км</b>\n\nТвой баланс: {_balance_str(u['coins'])}\nВсего походов: <b>{u['dungeon_runs']}</b> (🥾 {u['dungeon_distance']} км)"
         
     db_save_user(q.from_user.id, **u)
     _check_rich_achievements(q.from_user.id)
@@ -2513,14 +2525,15 @@ async def cb_menu_top_dung(update, ctx):
     
     with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT user_id, username, dungeon_runs, title FROM users_data WHERE dungeon_runs > 0 ORDER BY dungeon_runs DESC LIMIT 5").fetchall()
+        rows = conn.execute("SELECT user_id, username, dungeon_runs, dungeon_distance, title FROM users_data WHERE dungeon_runs > 0 ORDER BY dungeon_runs DESC LIMIT 5").fetchall()
         
     lines = ["⚔️ <b>Топ Подземельщиков:</b>", ""]
     if rows:
         for i, r in enumerate(rows, 1):
             uname = r['username']
             link = f'<a href="https://t.me/{uname}">👤 {html.escape(uname)}</a>' if uname else f'👤 Игрок {r["user_id"]}'
-            lines.append(f"{i}. {link} — {r['dungeon_runs']} походов")
+            km = r['dungeon_distance'] or 0
+            lines.append(f"{i}. {link} — {r['dungeon_runs']} походов | 🥾 {km} км")
     else:
         lines.append("Пока пусто.")
         
