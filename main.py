@@ -2184,7 +2184,6 @@ async def cb_fish_upgrade(update, ctx):
     u = db_get_user(q.from_user.id, q.from_user)
     
     price = u['fish_rod'] * 500
-    if u['fish_rod'] >= 5: return await q.answer("Удочка максимального уровня!", show_alert=True)
     if u['coins'] < price: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= price
