@@ -101,8 +101,8 @@ SHOP_ITEMS = {
     "case_gold": {"name": "Золотой кейс", "emoji": "💎", "price": 1000, "desc": "Шанс 45%. Выигрыш до 2000🍁!", "modes": ("now",), "cat": "misc"},
     "custom_title": {"name": "Свой титул", "emoji": "🎨", "price": 2000, "desc": "Позволяет задать свой текст в качестве титула (до 15 символов)", "modes": ("now",), "cat": "misc"},
     
-    "bait_advanced": {"name": "Улучшенная наживка x10", "emoji": "🐛", "price": 300, "desc": "10 шт. Сапог реже (15%), редкая рыба чаще", "modes": ("now",), "cat": "fish"},
-    "bait_luxury": {"name": "Премиум наживка x10", "emoji": "🦐", "price": 800, "desc": "10 шт. Сапог 5%, редкий улов чаще", "modes": ("now",), "cat": "fish"},
+    "bait_advanced": {"name": "Улучшенная наживка", "emoji": "🐛", "price": 300, "desc": "10 шт. Сапог реже (15%), редкая рыба чаще", "modes": ("now",), "cat": "fish"},
+    "bait_luxury": {"name": "Премиум наживка", "emoji": "🦐", "price": 800, "desc": "10 шт. Сапог 5%, редкий улов чаще", "modes": ("now",), "cat": "fish"},
 }
 
 TITLES_SHOP = {
