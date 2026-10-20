@@ -770,7 +770,11 @@ async def cmd_dm_other(update, ctx):
             except Exception:
                 pass
         else:
-            await msg.reply_text("❌ Ошибка. Пиши: <code>Слово | Описание</code>", parse_mode=ParseMode.HTML)
+            await msg.reply_text("❌ Ошибка. Пиши: <code>Слово | Описание</code>. Загадай заново в чате.")
+            try:
+                await ctx.bot.send_message(chat_id, "🐊 <b>Крокодил</b>\nНажми кнопку, чтобы загадать слово.", message_thread_id=THREAD_ID or 0, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]]))
+            except Exception:
+                pass
         return
         
     await msg.reply_text(_menu_text(uid, update.effective_user), parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
@@ -1351,9 +1355,12 @@ async def cb_shop_cat(update, ctx):
         title = "📦 Разное"
         
     rows = []
-    for iid, item in SHOP_ITEMS.items():
-        if item.get("cat") == cat:
-            rows.append([InlineKeyboardButton(f"{item['emoji']} {item['name']} — {item['price']}🍁", callback_data=f"shop:item:{chat_id}:{iid}")])
+    sorted_items = sorted(
+        [item for item in SHOP_ITEMS.items() if item[1].get("cat") == cat],
+        key=lambda x: x[1]["price"]
+    )
+    for iid, item in sorted_items:
+        rows.append([InlineKeyboardButton(f"{item['emoji']} {item['name']} — {item['price']}🍁", callback_data=f"shop:item:{chat_id}:{iid}")])
             
     rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:shop:{chat_id}")])
     await q.edit_message_text(f"{title}\n\nБаланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
@@ -2147,11 +2154,22 @@ async def cb_croc_new(update, ctx):
         return await q.answer("Кто-то уже загадывает слово, подожди.", show_alert=True)
         
     CROC_AWAITING[q.from_user.id] = q.message.chat.id
+    
+    name = get_safe_name(q.from_user)
+    try:
+        await q.edit_message_text(f"🐊 <b>Крокодил</b>\n\n⏳ <b>{name}</b> сейчас загадывает слово...\n<i>(Напиши в ЛС бота)</i>", parse_mode=ParseMode.HTML)
+    except Exception:
+        pass
+        
     await q.answer("Напиши мне в ЛС слово и описание!", show_alert=True)
     try: 
         await ctx.bot.send_message(q.from_user.id, "🐊 Отправь: <code>Слово | Описание</code>", parse_mode=ParseMode.HTML)
     except Exception: 
         CROC_AWAITING.pop(q.from_user.id, None)
+        try:
+            await q.edit_message_text("🐊 <b>Крокодил</b>\nНажми кнопку, чтобы загадать слово.", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]]))
+        except Exception:
+            pass
         await q.answer("Сначала нажми /start в ЛС бота!", show_alert=True)
 
 async def croc_guess_mw(update, ctx):
@@ -2185,4 +2203,140 @@ async def croc_guess_mw(update, ctx):
         
         if new_lvl >= 5 and "level_5" not in u['achievements']: u['achievements'].append("level_5")
         if new_lvl >= 10 and "level_10" not in u['achievements']: u['achievements'].append("level_10")
-        if new_lvl >= 20 and "level_20" not in u['achievements']:
+        if new_lvl >= 20 and "level_20" not in u['achievements']: u['achievements'].append("level_20")
+        if new_lvl >= 30 and "level_30" not in u['achievements']: u['achievements'].append("level_30")
+        if new_lvl >= 50 and "level_50" not in u['achievements']: u['achievements'].append("level_50")
+        
+        if len(u['achievements']) >= 10 and "ach_10" not in u['achievements']: u['achievements'].append("ach_10")
+        
+        db_save_user(msg.from_user.id, **u)
+        _check_rich_achievements(msg.from_user.id)
+        
+        msg_text = f"🐊 Ты угадал слово <b>{game['word']}</b>!\nНаграда: +5🍁\nОпыт: <b>+2 XP</b>"
+        if new_lvl > old_lvl:
+            msg_text += f"\n⭐ <b>Уровень повышен до {new_lvl}!</b>"
+            
+        try:
+            await ctx.bot.send_message(msg.from_user.id, msg_text, parse_mode=ParseMode.HTML)
+        except Exception: 
+            pass
+        
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Загадать слово", callback_data="croc:new")]])
+        await msg.reply_text(f"🎉 <b>{get_safe_name(msg.from_user)}</b> угадал слово <b>{game['word']}</b>!\nНаграда: +5🍁\n\nЗагадай следующее:", parse_mode=ParseMode.HTML, reply_markup=kb)
+        raise ApplicationHandlerStop
+    else:
+        try: 
+            await msg.set_reaction("❌")
+        except Exception: 
+            pass
+
+async def cb_noop(update, ctx):
+    await update.callback_query.answer()
+
+async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.error("Exception while handling an update:", exc_info=context.error)
+
+
+def _build_app():
+    app = Application.builder().token(BOT_TOKEN).build()
+    g = filters.ChatType.GROUPS
+
+    app.add_handler(MessageHandler(filters.ALL, ban_middleware), group=-500)
+    app.add_handler(CallbackQueryHandler(ban_callback_mw), group=-500)
+
+    app.add_handler(MessageHandler(g, activation_mw), group=-300)
+    app.add_handler(MessageHandler(g, guard_muted_messages), group=-100)
+    app.add_handler(MessageHandler(g, croc_guess_mw), group=-50)
+
+    app.add_handler(ChatMemberHandler(on_bot_added, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(ACTIVATION_REGEX), cmd_activate))
+    app.add_handler(CommandHandler("activate", cmd_activate, filters=g))
+
+    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(MAFIA_START_REGEX), cmd_mafia_start))
+    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(MAFIA_STOP_REGEX), cmd_mafia_stop))
+    app.add_handler(CommandHandler("mafia", cmd_mafia_start, filters=g))
+    app.add_handler(CommandHandler("mafia_stop", cmd_mafia_stop, filters=g))
+    
+    app.add_handler(CommandHandler("crocodile", cmd_crocodile, filters=g))
+    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(CROCODILE_REGEX), cmd_crocodile))
+    app.add_handler(MessageHandler(g & filters.TEXT & filters.Regex(CROCODILE_STOP_REGEX), cmd_crocodile_stop))
+
+    app.add_handler(CommandHandler("start", cmd_dm_start, filters=filters.ChatType.PRIVATE))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, cmd_dm_other))
+
+    app.add_handler(CallbackQueryHandler(cb_start_count, pattern=r"^ms:"))
+    app.add_handler(CallbackQueryHandler(cb_join, pattern=r"^mj$"))
+    app.add_handler(CallbackQueryHandler(cb_cancel, pattern=r"^mc$"))
+    app.add_handler(CallbackQueryHandler(cb_night_action, pattern=r"^mn:"))
+    app.add_handler(CallbackQueryHandler(cb_vote, pattern=r"^mv:"))
+    
+    app.add_handler(CallbackQueryHandler(cb_open_menu, pattern=r"^openmenu:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_main, pattern=r"^menu:main:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_profile, pattern=r"^menu:profile:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_ach, pattern=r"^menu:ach:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_titles, pattern=r"^menu:titles:"))
+    app.add_handler(CallbackQueryHandler(cb_title_set, pattern=r"^title:set:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_shop, pattern=r"^menu:shop:"))
+    app.add_handler(CallbackQueryHandler(cb_shop_cat, pattern=r"^shop:cat:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_inv, pattern=r"^menu:inv:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_top, pattern=r"^menu:top:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_bonus, pattern=r"^menu:bonus:"))
+    app.add_handler(CallbackQueryHandler(cb_menu_buy, pattern=r"^menu:buy:"))
+    
+    app.add_handler(CallbackQueryHandler(cb_farm_main, pattern=r"^farm:main:"))
+    app.add_handler(CallbackQueryHandler(cb_farm_plant_menu, pattern=r"^farm:plant_menu:"))
+    app.add_handler(CallbackQueryHandler(cb_farm_plant, pattern=r"^farm:plant:"))
+    app.add_handler(CallbackQueryHandler(cb_farm_harvest, pattern=r"^farm:harvest:"))
+    app.add_handler(CallbackQueryHandler(cb_farm_buy_plot, pattern=r"^farm:buy_plot:"))
+    
+    app.add_handler(CallbackQueryHandler(cb_fish_main, pattern=r"^fish:main:"))
+    app.add_handler(CallbackQueryHandler(cb_fish_cast, pattern=r"^fish:cast:"))
+    app.add_handler(CallbackQueryHandler(cb_fish_buy_bait, pattern=r"^fish:buy_bait:"))
+    app.add_handler(CallbackQueryHandler(cb_fish_upgrade, pattern=r"^fish:upgrade:"))
+    
+    app.add_handler(CallbackQueryHandler(cb_dungeon_main, pattern=r"^dungeon:main:"))
+    app.add_handler(CallbackQueryHandler(cb_dungeon_start, pattern=r"^dungeon:start:"))
+    app.add_handler(CallbackQueryHandler(cb_dungeon_up_w, pattern=r"^dungeon:up_w:"))
+    app.add_handler(CallbackQueryHandler(cb_dungeon_up_a, pattern=r"^dungeon:up_a:"))
+    
+    app.add_handler(CallbackQueryHandler(cb_shop_item, pattern=r"^shop:item:"))
+    app.add_handler(CallbackQueryHandler(cb_shop_buy, pattern=r"^shop:buy:"))
+    app.add_handler(CallbackQueryHandler(cb_inv_item, pattern=r"^inv:item:"))
+    app.add_handler(CallbackQueryHandler(cb_inv_use, pattern=r"^inv:use:"))
+    
+    app.add_handler(CallbackQueryHandler(cb_admin_main, pattern=r"^admin:main$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_act, pattern=r"^admin:act:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_case, pattern=r"^admin:case$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_case_edit, pattern=r"^admin:case_edit:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_case_set, pattern=r"^admin:case_set:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_econ, pattern=r"^admin:econ$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_econ_farm, pattern=r"^admin:econ_farm$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_econ_farm_edit, pattern=r"^admin:econ_farm_edit:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_econ_fish, pattern=r"^admin:econ_fish$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_econ_fish_rew, pattern=r"^admin:econ_fish_rew$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_econ_dungeon, pattern=r"^admin:econ_dungeon$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_econ_set, pattern=r"^admin:econ_set:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_users, pattern=r"^admin:users$"))
+    
+    app.add_handler(CallbackQueryHandler(cb_croc_new, pattern=r"^croc:new$"))
+    app.add_handler(CallbackQueryHandler(cb_noop, pattern=r"^noop$"))
+
+    app.add_error_handler(_error_handler)
+    return app
+
+async def _run_bot():
+    app = _build_app()
+    await app.initialize()
+    await app.bot.set_my_commands([])
+    await app.start()
+    await app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    await asyncio.Event().wait()
+
+def main():
+    try:
+        asyncio.run(_run_bot())
+    except KeyboardInterrupt:
+        pass
+
+if __name__ == "__main__":
+    main()
