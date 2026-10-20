@@ -170,7 +170,7 @@ SETTING_NAMES = {
     "pet_base_yield": "🐾 Питомец: Доход (база)",
     "pet_yield_per_level": "🐾 Питомец: Доход (за ур.)",
     
-    "leaf_price": "💎 Курс листика (руб.)",
+    "leaf_price": "💎 Курс листика (₽)",
 }
 
 def get_setting_name(key):
@@ -790,7 +790,7 @@ async def ban_middleware(update, ctx):
             f"⛔ <b>Вы забанены!</b>\n\n"
             f"Вы не можете использовать бота.\n\n"
             f"🛠 Приобрести разбан можете у технического специалиста: {SELLER_USERNAME}\n"
-            f"💰 Стоимость разбана: <b>500 рублей</b>."
+            f"💰 Стоимость разбана: <b>500 ₽</b>."
         )
         try:
             await ctx.bot.send_message(user.id, ban_text, parse_mode=ParseMode.HTML)
@@ -812,7 +812,7 @@ async def ban_callback_mw(update, ctx):
     if not user or user.id == ADMIN_ID:
         return
     if is_user_banned(user.id):
-        await q.answer(f"Вы забанены. Разбан: 500 руб. у {SELLER_USERNAME}", show_alert=True)
+        await q.answer(f"Вы забанены. Разбан: 500 ₽ у {SELLER_USERNAME}", show_alert=True)
         raise ApplicationHandlerStop
 
 
@@ -892,7 +892,7 @@ async def cmd_dm_other(update, ctx):
         action = ADMIN_STATE.pop(uid)
         
         try:
-            if action == "give_item":
+            if action in ("give_item", "take_item"):
                 parts = msg.text.split(maxsplit=1)
                 target = int(parts[0].replace("@", ""))
                 full_rest = parts[1].strip() if len(parts) > 1 else ""
@@ -920,29 +920,48 @@ async def cmd_dm_other(update, ctx):
                     
                 u = db_get_user(target)
                 
+                if action == "take_item":
+                    amount = -abs(amount)
+                    
                 if item_id in SHOP_ITEMS:
-                    u['inventory'][item_id] = u['inventory'].get(item_id, 0) + amount
+                    current_qty = u['inventory'].get(item_id, 0)
+                    if current_qty + amount < 0:
+                        return await msg.reply_text(f"❌ У юзера {target} только {current_qty} шт. '{ITEM_NAMES.get(item_id, item_id)}'.", reply_markup=_menu_main_kb(uid))
+                    u['inventory'][item_id] = current_qty + amount
+                    if u['inventory'][item_id] <= 0:
+                        del u['inventory'][item_id]
                     item_name = f"{SHOP_ITEMS[item_id]['emoji']} {SHOP_ITEMS[item_id]['name']}"
                     db_save_user(target, **u)
                 elif item_id == "fish_bait":
+                    if u['fish_bait'] + amount < 0:
+                        return await msg.reply_text(f"❌ У юзера {target} только {u['fish_bait']} шт. обычной наживки.", reply_markup=_menu_main_kb(uid))
                     u['fish_bait'] += amount
                     item_name = "🪱 Обычная наживка"
                     db_save_user(target, **u)
                 elif item_id == "fish_rod":
+                    if u['fish_rod'] + amount < 1:
+                        return await msg.reply_text(f"❌ Уровень удочки не может быть меньше 1.", reply_markup=_menu_main_kb(uid))
                     u['fish_rod'] += amount
                     item_name = "🎣 Удочка (уровень)"
                     db_save_user(target, **u)
                 elif item_id == "dungeon_weapon":
+                    if u['dungeon_weapon'] + amount < 1:
+                        return await msg.reply_text(f"❌ Уровень оружия не может быть меньше 1.", reply_markup=_menu_main_kb(uid))
                     u['dungeon_weapon'] += amount
                     item_name = "🗡 Оружие (уровень)"
                     db_save_user(target, **u)
                 elif item_id == "dungeon_armor":
+                    if u['dungeon_armor'] + amount < 1:
+                        return await msg.reply_text(f"❌ Уровень брони не может быть меньше 1.", reply_markup=_menu_main_kb(uid))
                     u['dungeon_armor'] += amount
                     item_name = "🛡 Броня (уровень)"
                     db_save_user(target, **u)
                 
-                await msg.reply_text(f"✅ Выдано {amount} x {item_name} юзеру {target}", reply_markup=_menu_main_kb(uid))
-                await _safe_send(ctx.bot, target, f"🎁 <b>Уведомление</b>\n\nТебе выдано: <b>{item_name}</b> x{amount}!", parse_mode=ParseMode.HTML)
+                abs_amount = abs(amount)
+                action_word = "Выдано" if amount > 0 else "Забрано"
+                notif_word = "выдано" if amount > 0 else "забрано"
+                await msg.reply_text(f"✅ {action_word} {abs_amount} x {item_name} юзеру {target}", reply_markup=_menu_main_kb(uid))
+                await _safe_send(ctx.bot, target, f"🎁 <b>Уведомление</b>\n\nУ тебя <b>{notif_word}</b>: <b>{item_name}</b> x{abs_amount}!", parse_mode=ParseMode.HTML)
                 return
 
             parts = msg.text.split(maxsplit=2)
@@ -2706,7 +2725,7 @@ async def cb_menu_buy(update, ctx):
         chat_id = 0
     
     leaf_price = db_get_setting("leaf_price", "5")
-    text = f"💎 <b>Покупка листиков</b>\n\nАктуальный курс: <b>1 листик = {leaf_price} рублей</b>\n\nДля покупки напишите нашему менеджеру: {SELLER_USERNAME}\nПосле перевода он выдаст вам листики.\n\n<i>(Обязательно укажите ваш ID: <code>{q.from_user.id}</code>)</i>"
+    text = f"💎 <b>Покупка листиков</b>\n\nАктуальный курс: <b>1 листик = {leaf_price} ₽</b>\n\nДля покупки напишите нашему менеджеру: {SELLER_USERNAME}\nПосле перевода он выдаст вам листики.\n\n<i>(Обязательно укажите ваш ID: <code>{q.from_user.id}</code>)</i>"
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
     await q.answer()
 
@@ -2723,6 +2742,7 @@ async def cb_admin_main(update, ctx):
         [InlineKeyboardButton("👑 Выдать титул", callback_data="admin:act:give_title")],
         [InlineKeyboardButton("🚫 Забрать титул", callback_data="admin:act:take_title")],
         [InlineKeyboardButton("🎒 Выдать предмет", callback_data="admin:act:give_item")],
+        [InlineKeyboardButton("🗑 Забрать предмет", callback_data="admin:act:take_item")],
         [InlineKeyboardButton("🔍 Профиль юзера", callback_data="admin:act:view_profile")],
         [InlineKeyboardButton("🚫 Забанить юзера", callback_data="admin:act:ban_user")],
         [InlineKeyboardButton("✅ Разбанить юзера", callback_data="admin:act:unban_user")],
@@ -2738,7 +2758,7 @@ async def cb_admin_main(update, ctx):
 async def cb_admin_donate(update, ctx):
     q = update.callback_query
     leaf_price = db_get_setting("leaf_price", "5")
-    text = f"💎 <b>Настройки Доната</b>\n\nТекущий курс: <b>1 листик = {leaf_price} руб.</b>"
+    text = f"💎 <b>Настройки Доната</b>\n\nТекущий курс: <b>1 листик = {leaf_price} ₽</b>"
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 Изменить курс", callback_data="admin:econ_set:leaf_price")],
         [InlineKeyboardButton("◀️ Назад", callback_data="admin:main")]
@@ -2964,7 +2984,7 @@ async def cb_admin_act(update, ctx):
     act = q.data.split(":")[2]
     ADMIN_STATE[q.from_user.id] = act
     
-    if act == "give_item":
+    if act in ("give_item", "take_item"):
         items_list = "\n".join([f"• {v} (<code>{k}</code>)" for k, v in ITEM_NAMES.items()])
         prompt = f"Отправь: <code>ID_юзера Название_предмета [кол-во]</code>\n<i>(например: 123456789 Улучшенная наживка 5)</i>\n\n<b>Список предметов:</b>\n{items_list}"
     else:
