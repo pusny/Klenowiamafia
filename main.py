@@ -215,6 +215,7 @@ def _init_db():
                 pet_hunger INTEGER DEFAULT 100,
                 pet_happy INTEGER DEFAULT 100,
                 pet_last_time REAL DEFAULT 0,
+                pet_sick INTEGER DEFAULT 0,
                 farm_harvests INTEGER DEFAULT 0,
                 fish_caught INTEGER DEFAULT 0,
                 dungeon_runs INTEGER DEFAULT 0
@@ -256,6 +257,8 @@ def _init_db():
             conn.execute("ALTER TABLE users_data ADD COLUMN pet_happy INTEGER DEFAULT 100")
         if "pet_last_time" not in cols:
             conn.execute("ALTER TABLE users_data ADD COLUMN pet_last_time REAL DEFAULT 0")
+        if "pet_sick" not in cols:
+            conn.execute("ALTER TABLE users_data ADD COLUMN pet_sick INTEGER DEFAULT 0")
         if "farm_harvests" not in cols:
             conn.execute("ALTER TABLE users_data ADD COLUMN farm_harvests INTEGER DEFAULT 0")
         if "fish_caught" not in cols:
@@ -332,9 +335,16 @@ def _init_db():
         
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_cost', '500')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_feed_cost', '50')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_feed_cost_per_level', '30')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_play_cost', '30')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_play_cost_per_level', '20')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_upgrade_cost_base', '1000')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_decay_time', '600')")
         conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_base_yield', '20')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_yield_per_level', '5')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_heal_cost_per_level', '500')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_feed_restore', '60')")
+        conn.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('pet_play_restore', '60')")
         conn.commit()
 
 _init_db()
@@ -403,6 +413,7 @@ def db_get_user(user_id, tg_user=None):
         d['pet_hunger'] = int(d.get('pet_hunger') or 100)
         d['pet_happy'] = int(d.get('pet_happy') or 100)
         d['pet_last_time'] = float(d.get('pet_last_time') or 0.0)
+        d['pet_sick'] = int(d.get('pet_sick') or 0)
         d['farm_harvests'] = int(d.get('farm_harvests') or 0)
         d['fish_caught'] = int(d.get('fish_caught') or 0)
         d['dungeon_runs'] = int(d.get('dungeon_runs') or 0)
@@ -426,7 +437,7 @@ def db_save_user(uid, **kwargs):
             UPDATE users_data SET 
                 username=?, coins=?, level=?, title=?, wins=?, games=?, inventory=?, achievements=?, unlocked_titles=?, last_bonus=?, croc_wins=?, mafia_wins=?, city_wins=?,
                 farm_slots=?, farm_data=?, fish_rod=?, fish_bait=?, fish_cd=?, dungeon_weapon=?, dungeon_armor=?, dungeon_cd=?,
-                pet_name=?, pet_level=?, pet_hunger=?, pet_happy=?, pet_last_time=?,
+                pet_name=?, pet_level=?, pet_hunger=?, pet_happy=?, pet_last_time=?, pet_sick=?,
                 farm_harvests=?, fish_caught=?, dungeon_runs=?
             WHERE user_id=?
         """, (
@@ -434,7 +445,7 @@ def db_save_user(uid, **kwargs):
             json.dumps(u['inventory']), json.dumps(u['achievements']), json.dumps(u['unlocked_titles']), u['last_bonus'],
             u['croc_wins'], u['mafia_wins'], u['city_wins'],
             u['farm_slots'], json.dumps(u['farm_data']), u['fish_rod'], u['fish_bait'], u['fish_cd'], u['dungeon_weapon'], u['dungeon_armor'], u['dungeon_cd'],
-            u['pet_name'], u['pet_level'], u['pet_hunger'], u['pet_happy'], u['pet_last_time'],
+            u['pet_name'], u['pet_level'], u['pet_hunger'], u['pet_happy'], u['pet_last_time'], u['pet_sick'],
             u['farm_harvests'], u['fish_caught'], u['dungeon_runs'], uid
         ))
         conn.commit()
@@ -1739,26 +1750,41 @@ async def cb_pet_main(update, ctx):
         u['pet_hunger'] = new_hunger
         u['pet_happy'] = new_happy
         u['pet_last_time'] = now - (diff % decay_time)
-        db_save_user(q.from_user.id, pet_hunger=new_hunger, pet_happy=new_happy, pet_last_time=u['pet_last_time'])
         
+        new_sick = u['pet_sick']
+        if (new_hunger < 30 or new_happy < 30) and not new_sick:
+            new_sick = 1
+        db_save_user(q.from_user.id, pet_hunger=new_hunger, pet_happy=new_happy, pet_last_time=u['pet_last_time'], pet_sick=new_sick)
+        u['pet_sick'] = new_sick
+    
+    feed_cost = int(db_get_setting("pet_feed_cost", "50")) + (u['pet_level'] - 1) * int(db_get_setting("pet_feed_cost_per_level", "30"))
+    play_cost = int(db_get_setting("pet_play_cost", "30")) + (u['pet_level'] - 1) * int(db_get_setting("pet_play_cost_per_level", "20"))
+    upgrade_cost = u['pet_level'] * int(db_get_setting("pet_upgrade_cost_base", "1000"))
+    heal_cost = u['pet_level'] * int(db_get_setting("pet_heal_cost_per_level", "500"))
+    
+    base_yield = int(db_get_setting("pet_base_yield", "20"))
+    yield_per_level = int(db_get_setting("pet_yield_per_level", "5"))
+    collect_reward = base_yield + (u['pet_level'] - 1) * yield_per_level
+    
+    sick_marker = "\n🚨 <b>ПИТОМЕЦ БОЛЕН!</b> <i>Покорми/поиграй и вылечи, чтобы собирать листики.</i>" if u['pet_sick'] else ""
     text = (f"🐾 <b>Твой питомец: {u['pet_name']}</b>\n"
-            f"⭐ Уровень: <b>{u['pet_level']}</b>\n\n"
+            f"⭐ Уровень: <b>{u['pet_level']}</b>{sick_marker}\n\n"
             f"🍖 Сытость: <b>{u['pet_hunger']}/100</b>\n"
-            f"🎾 Счастье: <b>{u['pet_happy']}/100</b>\n\n")
+            f"🎾 Счастье: <b>{u['pet_happy']}/100</b>\n\n"
+            f"💰 Сбор листиков даст: <b>+{collect_reward}🍁</b>\n"
+            f"🍖 Кормёжка: <b>{feed_cost}🍁</b>\n"
+            f"🎾 Игра: <b>{play_cost}🍁</b>")
             
-    feed_cost = db_get_setting("pet_feed_cost", "50")
-    play_cost = db_get_setting("pet_play_cost", "30")
-    up_cost = u['pet_level'] * 500
+    rows = []
+    if u['pet_sick']:
+        rows.append([InlineKeyboardButton(f"💊 Вылечить ({heal_cost}🍁)", callback_data=f"pet:heal:{chat_id}")])
+    rows.append([InlineKeyboardButton(f"🍖 Покормить ({feed_cost}🍁)", callback_data=f"pet:feed:{chat_id}")])
+    rows.append([InlineKeyboardButton(f"🎾 Поиграть ({play_cost}🍁)", callback_data=f"pet:play:{chat_id}")])
+    rows.append([InlineKeyboardButton(f"⬆️ Прокачать (Ур. {u['pet_level']+1} / {upgrade_cost}🍁)", callback_data=f"pet:upgrade:{chat_id}")])
+    rows.append([InlineKeyboardButton(f"🍁 Собрать листики (+{collect_reward}🍁)", callback_data=f"pet:collect:{chat_id}")])
+    rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")])
     
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🍖 Покормить ({feed_cost}🍁)", callback_data=f"pet:feed:{chat_id}")],
-        [InlineKeyboardButton(f"🎾 Поиграть ({play_cost}🍁)", callback_data=f"pet:play:{chat_id}")],
-        [InlineKeyboardButton(f"⬆️ Прокачать (Ур. {u['pet_level']+1} / {up_cost}🍁)", callback_data=f"pet:upgrade:{chat_id}")],
-        [InlineKeyboardButton("🍁 Собрать листики", callback_data=f"pet:collect:{chat_id}")],
-        [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")]
-    ])
-    
-    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
     await q.answer()
 
 async def cb_pet_adopt(update, ctx):
@@ -1784,6 +1810,7 @@ async def cb_pet_adopt(update, ctx):
     u['pet_hunger'] = 100
     u['pet_happy'] = 100
     u['pet_last_time'] = time.time()
+    u['pet_sick'] = 0
     
     db_save_user(q.from_user.id, **u)
     await q.answer(f"Ты завел: {pet}!")
@@ -1797,17 +1824,15 @@ async def cb_pet_feed(update, ctx):
     u = db_get_user(q.from_user.id, q.from_user)
     
     if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
-    cost = int(db_get_setting("pet_feed_cost", "50"))
+    cost = int(db_get_setting("pet_feed_cost", "50")) + (u['pet_level'] - 1) * int(db_get_setting("pet_feed_cost_per_level", "30"))
     if u['coins'] < 0:
         return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < cost: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= cost
-    u['pet_hunger'] = min(100, u['pet_hunger'] + 30)
+    restore = int(db_get_setting("pet_feed_restore", "60"))
+    u['pet_hunger'] = min(100, u['pet_hunger'] + restore)
     
-    if random.randint(1, 100) <= 20 and u['pet_level'] < 10:
-        u['pet_level'] += 1
-        
     db_save_user(q.from_user.id, **u)
     await q.answer("Питомец покормлен!")
     await cb_pet_main(update, ctx)
@@ -1820,17 +1845,15 @@ async def cb_pet_play(update, ctx):
     u = db_get_user(q.from_user.id, q.from_user)
     
     if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
-    cost = int(db_get_setting("pet_play_cost", "30"))
+    cost = int(db_get_setting("pet_play_cost", "30")) + (u['pet_level'] - 1) * int(db_get_setting("pet_play_cost_per_level", "20"))
     if u['coins'] < 0:
         return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < cost: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= cost
-    u['pet_happy'] = min(100, u['pet_happy'] + 30)
+    restore = int(db_get_setting("pet_play_restore", "60"))
+    u['pet_happy'] = min(100, u['pet_happy'] + restore)
     
-    if random.randint(1, 100) <= 20 and u['pet_level'] < 10:
-        u['pet_level'] += 1
-        
     db_save_user(q.from_user.id, **u)
     await q.answer("Ты поиграл с питомцем!")
     await cb_pet_main(update, ctx)
@@ -1844,7 +1867,7 @@ async def cb_pet_upgrade(update, ctx):
     
     if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
     
-    cost = u['pet_level'] * 500
+    cost = u['pet_level'] * int(db_get_setting("pet_upgrade_cost_base", "1000"))
     if u['coins'] < 0:
         return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < cost: return await q.answer("Мало листиков для прокачки!", show_alert=True)
@@ -1853,6 +1876,27 @@ async def cb_pet_upgrade(update, ctx):
     u['pet_level'] += 1
     db_save_user(q.from_user.id, **u)
     await q.answer(f"Питомец прокачан до {u['pet_level']} уровня!")
+    await cb_pet_main(update, ctx)
+
+async def cb_pet_heal(update, ctx):
+    q = update.callback_query
+    if not q: return
+    try: chat_id = int(q.data.split(":")[2])
+    except Exception: chat_id = 0
+    u = db_get_user(q.from_user.id, q.from_user)
+    
+    if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
+    if not u['pet_sick']: return await q.answer("Питомец не болен!", show_alert=True)
+    
+    cost = u['pet_level'] * int(db_get_setting("pet_heal_cost_per_level", "500"))
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
+    if u['coins'] < cost: return await q.answer("Мало листиков на лечение!", show_alert=True)
+    
+    u['coins'] -= cost
+    u['pet_sick'] = 0
+    db_save_user(q.from_user.id, **u)
+    await q.answer("Питомец вылечен!")
     await cb_pet_main(update, ctx)
 
 async def cb_pet_collect(update, ctx):
@@ -1864,26 +1908,34 @@ async def cb_pet_collect(update, ctx):
     
     if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
     
+    if u['pet_sick']:
+        return await q.answer("🚨 Питомец болен! Сначала вылечи его.", show_alert=True)
+    
     if u['pet_hunger'] < 50 or u['pet_happy'] < 50:
         return await q.answer("Питомец голоден или грустит! Покорми или поиграй с ним.", show_alert=True)
         
     base_yield = int(db_get_setting("pet_base_yield", "20"))
-    reward = base_yield * u['pet_level']
+    yield_per_level = int(db_get_setting("pet_yield_per_level", "5"))
+    reward = base_yield + (u['pet_level'] - 1) * yield_per_level
     
     u['coins'] += reward
     u['pet_hunger'] = max(0, u['pet_hunger'] - 20)
     u['pet_happy'] = max(0, u['pet_happy'] - 20)
+    
+    if u['pet_hunger'] < 30 or u['pet_happy'] < 30:
+        u['pet_sick'] = 1
     
     db_save_user(q.from_user.id, **u)
     _check_rich_achievements(q.from_user.id)
     
     await q.answer(f"Собрано: +{reward}🍁!")
     
+    sick_warning = "\n\n🚨 <b>ВНИМАНИЕ: питомец заболел!</b> Его нужно вылечить." if u['pet_sick'] else ""
     text = (f"🐾 Ты собрал листики с питомца <b>{u['pet_name']}</b>!\n\n"
             f"Награда: <b>+{reward}🍁</b>\n"
             f"Твой баланс: {_balance_str(u['coins'])}\n\n"
             f"🍖 Сытость: {u['pet_hunger']}/100\n"
-            f"🎾 Счастье: {u['pet_happy']}/100")
+            f"🎾 Счастье: {u['pet_happy']}/100{sick_warning}")
             
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ К питомцу", callback_data=f"pet:main:{chat_id}")]])
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -2577,23 +2629,41 @@ async def cb_admin_econ_pet(update, ctx):
     q = update.callback_query
     cost = db_get_setting("pet_cost", "500")
     feed = db_get_setting("pet_feed_cost", "50")
+    feed_pl = db_get_setting("pet_feed_cost_per_level", "30")
     play = db_get_setting("pet_play_cost", "30")
+    play_pl = db_get_setting("pet_play_cost_per_level", "20")
+    up_base = db_get_setting("pet_upgrade_cost_base", "1000")
     decay = db_get_setting("pet_decay_time", "600")
     base_yield = db_get_setting("pet_base_yield", "20")
+    yield_pl = db_get_setting("pet_yield_per_level", "5")
+    heal_pl = db_get_setting("pet_heal_cost_per_level", "500")
+    feed_r = db_get_setting("pet_feed_restore", "60")
+    play_r = db_get_setting("pet_play_restore", "60")
     
     text = (f"🐾 <b>Настройки питомца</b>\n\n"
             f"Цена покупки: <b>{cost}🍁</b>\n"
-            f"Цена кормежки: <b>{feed}🍁</b>\n"
-            f"Цена игры: <b>{play}🍁</b>\n"
+            f"Кормёжка (база): <b>{feed}🍁</b> + <b>{feed_pl}🍁</b>/ур.\n"
+            f"Игра (база): <b>{play}🍁</b> + <b>{play_pl}🍁</b>/ур.\n"
+            f"Прокачка: <b>уровень * {up_base}🍁</b>\n"
+            f"Лечение: <b>уровень * {heal_pl}🍁</b>\n"
+            f"Восстановление кормёжкой: <b>{feed_r}</b>\n"
+            f"Восстановление игрой: <b>{play_r}</b>\n"
             f"Голодание (сек): <b>{decay}</b>\n"
-            f"Базовый доход: <b>{base_yield}🍁</b>")
+            f"Доход (база): <b>{base_yield}🍁</b> + <b>{yield_pl}🍁</b>/ур.")
             
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 Цена покупки", callback_data="admin:econ_set:pet_cost")],
-        [InlineKeyboardButton("🍖 Цена кормежки", callback_data="admin:econ_set:pet_feed_cost")],
-        [InlineKeyboardButton("🎾 Цена игры", callback_data="admin:econ_set:pet_play_cost")],
-        [InlineKeyboardButton("⏱ Голодание (сек)", callback_data="admin:econ_set:pet_decay_time")],
-        [InlineKeyboardButton("📈 Базовый доход", callback_data="admin:econ_set:pet_base_yield")],
+        [InlineKeyboardButton("🍖 Кормёжка база", callback_data="admin:econ_set:pet_feed_cost")],
+        [InlineKeyboardButton("🍖 Кормёжка /ур", callback_data="admin:econ_set:pet_feed_cost_per_level")],
+        [InlineKeyboardButton("🎾 Игра база", callback_data="admin:econ_set:pet_play_cost")],
+        [InlineKeyboardButton("🎾 Игра /ур", callback_data="admin:econ_set:pet_play_cost_per_level")],
+        [InlineKeyboardButton("⬆️ Прокачка /ур", callback_data="admin:econ_set:pet_upgrade_cost_base")],
+        [InlineKeyboardButton("💊 Лечение /ур", callback_data="admin:econ_set:pet_heal_cost_per_level")],
+        [InlineKeyboardButton("🍖 Восст. кормёжкой", callback_data="admin:econ_set:pet_feed_restore")],
+        [InlineKeyboardButton("🎾 Восст. игрой", callback_data="admin:econ_set:pet_play_restore")],
+        [InlineKeyboardButton("⏱ Голодание", callback_data="admin:econ_set:pet_decay_time")],
+        [InlineKeyboardButton("📈 Доход база", callback_data="admin:econ_set:pet_base_yield")],
+        [InlineKeyboardButton("📈 Доход /ур", callback_data="admin:econ_set:pet_yield_per_level")],
         [InlineKeyboardButton("◀️ Назад", callback_data="admin:econ")]
     ])
     await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -2867,6 +2937,7 @@ def _build_app():
     app.add_handler(CallbackQueryHandler(cb_pet_feed, pattern=r"^pet:feed:"))
     app.add_handler(CallbackQueryHandler(cb_pet_play, pattern=r"^pet:play:"))
     app.add_handler(CallbackQueryHandler(cb_pet_upgrade, pattern=r"^pet:upgrade:"))
+    app.add_handler(CallbackQueryHandler(cb_pet_heal, pattern=r"^pet:heal:"))
     app.add_handler(CallbackQueryHandler(cb_pet_collect, pattern=r"^pet:collect:"))
     
     app.add_handler(CallbackQueryHandler(cb_farm_main, pattern=r"^farm:main:"))
