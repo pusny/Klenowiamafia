@@ -638,6 +638,13 @@ class Game:
         return [p for p in self.players.values() if p.role == "mafia"]
 
 
+def _balance_str(coins):
+    c = int(coins)
+    if c < 0:
+        return f"<b>{c}🍁</b> ⚠️ <b>В МИНУСЕ</b>"
+    return f"<b>{c}🍁</b>"
+
+
 def _menu_main_kb(user_id, chat_id=0):
     rows = [
         [InlineKeyboardButton("👤 Профиль", callback_data=f"menu:profile:{chat_id}"), InlineKeyboardButton("🛒 Магазин", callback_data=f"menu:shop:{chat_id}")],
@@ -657,7 +664,10 @@ def _menu_back_kb(chat_id=0):
 
 def _menu_text(uid, tg_user=None):
     u = db_get_user(uid, tg_user)
-    return f"🍁 <b>Меню</b>\n\nБаланс: <b>{u['coins']}🍁</b>\nУровень: <b>{u['level']}</b>\nТитул: <b>{u['title']}</b>"
+    balance_line = _balance_str(u['coins'])
+    if u['coins'] < 0:
+        balance_line += "\n⚠️ <i>Пока баланс отрицательный — покупки заблокированы. Выйди в плюс через бонус или фарм.</i>"
+    return f"🍁 <b>Меню</b>\n\nБаланс: {balance_line}\nУровень: <b>{u['level']}</b>\nТитул: <b>{u['title']}</b>"
 
 
 async def ban_middleware(update, ctx):
@@ -829,7 +839,7 @@ async def cmd_dm_other(update, ctx):
                 
                 text = (f"👤 <b>Профиль юзера</b> <code>{target}</code>\n"
                         f"Имя: <b>{html.escape(u['username'] or 'Аноним')}</b>\n\n"
-                        f"🍁 Баланс: <b>{u['coins']}🍁</b>\n"
+                        f"🍁 Баланс: {_balance_str(u['coins'])}\n"
                         f"⭐ Уровень: <b>{u['level']}</b> (XP: {total_xp}/{u['level']*5})\n"
                         f"👑 Титул: <b>{u['title']}</b>\n"
                         f"🏆 Побед: <b>{u['wins']}</b> / Игр: <b>{u['games']}</b>\n"
@@ -1383,8 +1393,11 @@ async def cb_menu_profile(update, ctx):
     
     total_xp = u['wins'] * 2 + u['games'] + u['croc_wins']
     pet_str = f"{u['pet_name']} (Ур. {u['pet_level']})" if u['pet_name'] else "Нет"
+    balance_line = _balance_str(u['coins'])
+    if u['coins'] < 0:
+        balance_line += "\n\n⚠️ <b>ТЫ В МИНУСЕ!</b>\n<i>Все покупки и ставки заблокированы, пока баланс отрицательный.</i>"
     text = (f"👤 <b>Профиль</b>\n\n"
-            f"🍁 Листики: <b>{u['coins']}</b>\n"
+            f"🍁 Листики: {balance_line}\n"
             f"⭐ Уровень: <b>{u['level']}</b> (XP: {total_xp}/{u['level']*5})\n"
             f"👑 Титул: <b>{u['title']}</b>\n"
             f"🐾 Питомец: <b>{pet_str}</b>\n\n"
@@ -1460,6 +1473,8 @@ async def cb_title_set(update, ctx):
         if len(u['achievements']) < tdata['ach_req']:
             return await q.answer(f"Нужно {tdata['ach_req']} достижений!", show_alert=True)
     else:
+        if u['coins'] < 0:
+            return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
         if u['coins'] < tdata['price']:
             return await q.answer("Недостаточно листиков!", show_alert=True)
         u['coins'] -= tdata['price']
@@ -1484,7 +1499,7 @@ async def cb_menu_shop(update, ctx):
         [InlineKeyboardButton("📦 Разное", callback_data=f"shop:cat:{chat_id}:misc")],
         [InlineKeyboardButton("◀️ Назад", callback_data=f"menu:main:{chat_id}")]
     ])
-    await q.edit_message_text(f"🛒 <b>Магазин</b>\n\nБаланс: <b>{u['coins']}🍁</b>\n\nВыбери раздел:", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await q.edit_message_text(f"🛒 <b>Магазин</b>\n\nБаланс: {_balance_str(u['coins'])}\n\nВыбери раздел:", parse_mode=ParseMode.HTML, reply_markup=kb)
     await q.answer()
 
 async def cb_shop_cat(update, ctx):
@@ -1510,7 +1525,7 @@ async def cb_shop_cat(update, ctx):
         rows.append([InlineKeyboardButton(f"{item['emoji']} {item['name']} — {item['price']}🍁", callback_data=f"shop:item:{chat_id}:{iid}")])
             
     rows.append([InlineKeyboardButton("◀️ Назад", callback_data=f"menu:shop:{chat_id}")])
-    await q.edit_message_text(f"{title}\n\nБаланс: <b>{u['coins']}🍁</b>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
+    await q.edit_message_text(f"{title}\n\nБаланс: {_balance_str(u['coins'])}", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
     await q.answer()
 
 async def cb_shop_item(update, ctx):
@@ -1534,7 +1549,10 @@ async def cb_shop_buy(update, ctx):
     u = db_get_user(q.from_user.id, q.from_user)
     item = SHOP_ITEMS.get(iid)
     
-    if u['coins'] < item['price']: return await q.answer("Мало листиков!", show_alert=True)
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс через бонус или фарм.", show_alert=True)
+    if u['coins'] < item['price']: 
+        return await q.answer("Мало листиков!", show_alert=True)
     u['coins'] -= item['price']
     u['inventory'][iid] = u['inventory'].get(iid, 0) + 1
     db_save_user(q.from_user.id, **u)
@@ -1544,7 +1562,7 @@ async def cb_shop_buy(update, ctx):
     
     await q.answer("Куплено!")
     try: 
-        await q.edit_message_text(f"✅ Куплено: {item['name']}\nОстаток: {u['coins']}🍁", reply_markup=kb)
+        await q.edit_message_text(f"✅ Куплено: {item['name']}\nОстаток: {_balance_str(u['coins'])}", parse_mode=ParseMode.HTML, reply_markup=kb)
     except Exception: 
         pass
 
@@ -1616,13 +1634,13 @@ async def cb_inv_use(update, ctx):
         
         if reward > 0:
             await q.answer(f"🎉 Ты выиграл {reward}🍁!")
-            text = f"{SHOP_ITEMS[iid]['emoji']} Ты открыл {SHOP_ITEMS[iid]['name']} и получил: <b>+{reward}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>"
+            text = f"{SHOP_ITEMS[iid]['emoji']} Ты открыл {SHOP_ITEMS[iid]['name']} и получил: <b>+{reward}🍁</b>!\nТвой баланс: {_balance_str(u['coins'])}"
         elif reward < 0:
             await q.answer(f"💀 Ты потерял {abs(reward)}🍁!")
-            text = f"{SHOP_ITEMS[iid]['emoji']} Ты открыл {SHOP_ITEMS[iid]['name']} и потерял: <b>-{abs(reward)}🍁</b>!\nТвой баланс: <b>{u['coins']}🍁</b>"
+            text = f"{SHOP_ITEMS[iid]['emoji']} Ты открыл {SHOP_ITEMS[iid]['name']} и потерял: <b>-{abs(reward)}🍁</b>!\nТвой баланс: {_balance_str(u['coins'])}"
         else:
             await q.answer("Ты ничего не получил.")
-            text = f"{SHOP_ITEMS[iid]['emoji']} Ты открыл {SHOP_ITEMS[iid]['name']} и... ничего не получил.\nТвой баланс: <b>{u['coins']}🍁</b>"
+            text = f"{SHOP_ITEMS[iid]['emoji']} Ты открыл {SHOP_ITEMS[iid]['name']} и... ничего не получил.\nТвой баланс: {_balance_str(u['coins'])}"
             
         try:
             await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
@@ -1751,6 +1769,8 @@ async def cb_pet_adopt(update, ctx):
     if u['pet_name']: return await q.answer("У тебя уже есть питомец!", show_alert=True)
     
     cost = int(db_get_setting("pet_cost", "500"))
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < cost: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= cost
@@ -1776,6 +1796,8 @@ async def cb_pet_feed(update, ctx):
     
     if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
     cost = int(db_get_setting("pet_feed_cost", "50"))
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < cost: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= cost
@@ -1797,6 +1819,8 @@ async def cb_pet_play(update, ctx):
     
     if not u['pet_name']: return await q.answer("У тебя нет питомца!", show_alert=True)
     cost = int(db_get_setting("pet_play_cost", "30"))
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < cost: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= cost
@@ -1835,7 +1859,7 @@ async def cb_pet_collect(update, ctx):
     
     text = (f"🐾 Ты собрал листики с питомца <b>{u['pet_name']}</b>!\n\n"
             f"Награда: <b>+{reward}🍁</b>\n"
-            f"Твой баланс: <b>{u['coins']}🍁</b>\n\n"
+            f"Твой баланс: {_balance_str(u['coins'])}\n\n"
             f"🍖 Сытость: {u['pet_hunger']}/100\n"
             f"🎾 Счастье: {u['pet_happy']}/100")
             
@@ -1917,6 +1941,8 @@ async def cb_farm_plant(update, ctx):
     if seed_type not in seeds: return await q.answer("Неверный тип", show_alert=True)
     s = seeds[seed_type]
     
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < s['cost']: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= s['cost']
@@ -1961,16 +1987,16 @@ async def cb_farm_harvest(update, ctx):
     if reward > 0:
         text = (f"🌾 Ты собрал <b>{crop['name']}</b>!\n\n"
                 f"Награда: <b>+{reward}🍁</b>\n"
-                f"Твой баланс: <b>{u['coins']}🍁</b>\n\n"
+                f"Твой баланс: {_balance_str(u['coins'])}\n\n"
                 f"Всего собрано урожаев: <b>{u['farm_harvests']}</b>")
     elif reward < 0:
         text = (f"💀 <b>Неурожай!</b>\n\n"
                 f"Поле <b>{crop['name']}</b> сгнило. Пришлось докупить удобрения и семена: <b>{reward}🍁</b>.\n"
-                f"Твой баланс: <b>{u['coins']}🍁</b>\n\n"
+                f"Твой баланс: {_balance_str(u['coins'])}\n\n"
                 f"Всего собрано урожаев: <b>{u['farm_harvests']}</b>")
     else:
         text = (f"🌾 Ты собрал <b>{crop['name']}</b>, но едва вышел в ноль.\n"
-                f"Твой баланс: <b>{u['coins']}🍁</b>\n\n"
+                f"Твой баланс: {_balance_str(u['coins'])}\n\n"
                 f"Всего собрано урожаев: <b>{u['farm_harvests']}</b>")
             
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ На ферму", callback_data=f"farm:main:{chat_id}")]])
@@ -1984,6 +2010,8 @@ async def cb_farm_buy_plot(update, ctx):
     u = db_get_user(q.from_user.id, q.from_user)
     
     price = 100 * (u['farm_slots'] ** 2)
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < price: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= price
@@ -2098,17 +2126,17 @@ async def cb_fish_cast(update, ctx):
         text = (f"🎣 <b>Улов:</b>\n\n"
                 f"{loot}\n"
                 f"Награда: <b>+{reward}🍁</b>\n"
-                f"Твой баланс: <b>{u['coins']}🍁</b>\n\n"
+                f"Твой баланс: {_balance_str(u['coins'])}\n\n"
                 f"Всего поймано: <b>{u['fish_caught']}</b>")
     elif reward < 0:
         text = (f"💀 <b>Неудача...</b>\n\n"
                 f"Ты вытащил {loot}, но при этом сломал снасть. Пришлось купить новую: <b>{reward}🍁</b>.\n"
-                f"Твой баланс: <b>{u['coins']}🍁</b>\n\n"
+                f"Твой баланс: {_balance_str(u['coins'])}\n\n"
                 f"Всего поймано: <b>{u['fish_caught']}</b>")
     else:
         text = (f"🎣 <b>Улов:</b>\n\n{loot}\n"
                 f"Награда: <b>0🍁</b>\n"
-                f"Твой баланс: <b>{u['coins']}🍁</b>\n\n"
+                f"Твой баланс: {_balance_str(u['coins'])}\n\n"
                 f"Всего поймано: <b>{u['fish_caught']}</b>")
             
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ К озеру", callback_data=f"fish:main:{chat_id}")]])
@@ -2121,6 +2149,8 @@ async def cb_fish_buy_bait(update, ctx):
     except Exception: chat_id = 0
     u = db_get_user(q.from_user.id, q.from_user)
     
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < 100: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= 100
@@ -2138,6 +2168,8 @@ async def cb_fish_upgrade(update, ctx):
     
     price = u['fish_rod'] * 500
     if u['fish_rod'] >= 5: return await q.answer("Удочка максимального уровня!", show_alert=True)
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < price: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= price
@@ -2191,6 +2223,8 @@ async def cb_dungeon_start(update, ctx):
     if time.time() < u['dungeon_cd']: return await q.answer("Герой еще не вернулся!", show_alert=True)
     
     entry_cost = int(db_get_setting("dungeon_entry_cost", "100"))
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < entry_cost: return await q.answer("Мало листиков на вход!", show_alert=True)
     
     u['coins'] -= entry_cost
@@ -2220,11 +2254,11 @@ async def cb_dungeon_start(update, ctx):
         loot_item, loot_mult = random.choice(loot_table)
         reward = random.randint(reward_min, reward_max) * power * loot_mult
         u['coins'] += reward
-        msg = f"⚔️ <b>Успех!</b>\n\nГерой вернулся из Подземелья Листвы с ресурсом: <b>{loot_item}</b>!\nДобыча: <b>+{reward}🍁</b>!\n\nТвой баланс: <b>{u['coins']}🍁</b>\nВсего походов: <b>{u['dungeon_runs']}</b>"
+        msg = f"⚔️ <b>Успех!</b>\n\nГерой вернулся из Подземелья Листвы с ресурсом: <b>{loot_item}</b>!\nДобыча: <b>+{reward}🍁</b>!\n\nТвой баланс: {_balance_str(u['coins'])}\nВсего походов: <b>{u['dungeon_runs']}</b>"
     else:
         damage = random.randint(50, 150)
         u['coins'] -= damage
-        msg = f"💀 <b>Поражение...</b>\n\nГерой не справился с монстрами. На ремонт снаряжения ушло: <b>-{damage}🍁</b>.\n\nТвой баланс: <b>{u['coins']}🍁</b>\nВсего походов: <b>{u['dungeon_runs']}</b>"
+        msg = f"💀 <b>Поражение...</b>\n\nГерой не справился с монстрами. На ремонт снаряжения ушло: <b>-{damage}🍁</b>.\n\nТвой баланс: {_balance_str(u['coins'])}\nВсего походов: <b>{u['dungeon_runs']}</b>"
         
     db_save_user(q.from_user.id, **u)
     _check_rich_achievements(q.from_user.id)
@@ -2243,6 +2277,8 @@ async def cb_dungeon_up_w(update, ctx):
     u = db_get_user(q.from_user.id, q.from_user)
     
     price = u['dungeon_weapon'] * 300
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < price: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= price
@@ -2259,6 +2295,8 @@ async def cb_dungeon_up_a(update, ctx):
     u = db_get_user(q.from_user.id, q.from_user)
     
     price = u['dungeon_armor'] * 300
+    if u['coins'] < 0:
+        return await q.answer("⚠️ Ты в минусе! Сначала выйди в плюс.", show_alert=True)
     if u['coins'] < price: return await q.answer("Мало листиков!", show_alert=True)
     
     u['coins'] -= price
@@ -2291,7 +2329,7 @@ async def cb_menu_bonus(update, ctx):
     _check_rich_achievements(q.from_user.id)
     
     await q.answer(f"+{bonus_amount}🍁")
-    await q.edit_message_text(f"🍁 <b>Бонус</b> +{bonus_amount}🍁\nБаланс: {u['coins']}", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
+    await q.edit_message_text(f"🍁 <b>Бонус</b> +{bonus_amount}🍁\nБаланс: {_balance_str(u['coins'])}", parse_mode=ParseMode.HTML, reply_markup=_menu_back_kb(chat_id))
 
 async def cb_menu_top_menu(update, ctx):
     q = update.callback_query
