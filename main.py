@@ -1068,7 +1068,7 @@ async def cmd_dm_other(update, ctx):
         return
         
     if uid in CUSTOM_TITLE_AWAITING:
-        CUSTOM_TITLE_AWAITING.pop(uid)
+        chat_id = CUSTOM_TITLE_AWAITING.pop(uid)
         new_title = msg.text.strip().replace("\n", " ")[:15]
         if not new_title:
             return await msg.reply_text("❌ Титул не может быть пустым.", reply_markup=_menu_main_kb(uid))
@@ -1077,6 +1077,13 @@ async def cmd_dm_other(update, ctx):
         if new_title not in u['unlocked_titles']:
             u['unlocked_titles'].append(new_title)
         db_save_user(uid, title=new_title, unlocked_titles=u['unlocked_titles'])
+        
+        if chat_id != 0:
+            try:
+                await ctx.bot.set_chat_member_tag(chat_id=chat_id, user_id=uid, tag=new_title[:16])
+            except Exception as e:
+                log.warning(f"Failed to set chat member tag: {e}")
+                
         await msg.reply_text(f"✅ Твой новый титул: <b>{html.escape(new_title)}</b>", parse_mode=ParseMode.HTML, reply_markup=_menu_main_kb(uid))
         return
         
@@ -1639,6 +1646,11 @@ async def cb_title_set(update, ctx):
     
     if tdata['name'] in u['unlocked_titles']:
         db_save_user(q.from_user.id, title=tdata['name'])
+        if chat_id != 0:
+            try:
+                await ctx.bot.set_chat_member_tag(chat_id=chat_id, user_id=q.from_user.id, tag=tdata['name'][:16])
+            except Exception as e:
+                log.warning(f"Failed to set chat member tag: {e}")
         await q.answer(f"Титул изменён на {tdata['name']}!")
         return await cb_menu_titles(update, ctx)
         
@@ -1652,6 +1664,11 @@ async def cb_title_set(update, ctx):
         
     u['unlocked_titles'].append(tdata['name'])
     db_save_user(q.from_user.id, coins=u['coins'], title=tdata['name'], unlocked_titles=u['unlocked_titles'])
+    if chat_id != 0:
+        try:
+            await ctx.bot.set_chat_member_tag(chat_id=chat_id, user_id=q.from_user.id, tag=tdata['name'][:16])
+        except Exception as e:
+            log.warning(f"Failed to set chat member tag: {e}")
     await q.answer(f"Титул куплен и надет!")
     await cb_menu_titles(update, ctx)
 
@@ -1855,7 +1872,7 @@ async def cb_inv_use(update, ctx):
         if u['inventory'][iid] == 0: del u['inventory'][iid]
         db_save_user(q.from_user.id, **u)
         
-        CUSTOM_TITLE_AWAITING[q.from_user.id] = True
+        CUSTOM_TITLE_AWAITING[q.from_user.id] = chat_id
         await q.answer("Напиши свой титул в чат!")
         try:
             await q.edit_message_text("🎨 <b>Свой титул</b>\n\nНапиши в чат свой новый титул (до 15 символов):", parse_mode=ParseMode.HTML)
